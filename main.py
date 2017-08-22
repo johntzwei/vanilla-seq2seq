@@ -51,14 +51,6 @@ def neg_log_likelihood(y_true, y_pred):
     probs = K.sum(probs, axis=-1)
     return K.sum(-K.log(K.epsilon()+probs))
 
-def sequence_accuracy(y_true, y_pred):
-    y_pred = K.argmax(y_pred, axis=-1)
-    y_true = K.argmax(y_true, axis=-1)
-    x = K.cast(K.equal(y_pred, y_true), 'float32')
-    x = K.sum(x, axis=-1)
-    print(K.int_shape(y_true))
-    return x / K.int_shape(y_true)[1]
-
 class AttentionLSTM(LSTM):
     def __init__(self, output_dim, output_length=100, **kwargs):
         super(AttentionLSTM, self).__init__(output_dim, **kwargs)
@@ -155,7 +147,6 @@ if __name__ == '__main__':
     print('Reading train/valid data...')
     _, X_train = ptb(section='wsj_2-21', directory='data/', column=0)
     _, y_train = ptb(section='wsj_2-21', directory='data/', column=1)
-    X_train, y_train = X_train[:100], y_train[:100]
     X_train_seq, word_to_n, n_to_word = text_to_sequence(X_train, in_vocab, maxlen=100)
     y_train_seq, _, _ = text_to_sequence(y_train, out_vocab, maxlen=100)
 
@@ -171,7 +162,7 @@ if __name__ == '__main__':
     print('Building model...')
     optimizer = optimizers.Adam()
     model = Seq2SeqAttention(input_length=100, output_length=100, vocab_size=len(in_vocab), out_vocab_size=len(out_vocab))
-    model.compile(optimizer=optimizer, loss=neg_log_likelihood, metrics=[sequence_accuracy])
+    model.compile(optimizer=optimizer, loss=neg_log_likelihood, metrics=['accuracy'])
     plot_model(model, to_file='model.png')
     print('Done.')
 
