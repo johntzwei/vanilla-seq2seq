@@ -12,7 +12,7 @@ from keras.layers.wrappers import TimeDistributed
 
 from keras.preprocessing.sequence import pad_sequences
 from keras import optimizers
-from keras.callbacks import EarlyStopping
+from keras.callbacks import EarlyStopping, ModelCheckpoint
 from keras.utils import plot_model
 import keras.backend as K
 
@@ -147,33 +147,35 @@ if __name__ == '__main__':
     print('Reading train/valid data...')
     _, X_train = ptb(section='wsj_2-21', directory='data/', column=0)
     _, y_train = ptb(section='wsj_2-21', directory='data/', column=1)
-    X_train_seq, word_to_n, n_to_word = text_to_sequence(X_train, in_vocab, maxlen=100)
-    y_train_seq, _, _ = text_to_sequence(y_train, out_vocab, maxlen=100)
+
+    X_train_seq, word_to_n, n_to_word = text_to_sequence(X_train, in_vocab, maxlen=50)
+    y_train_seq, _, _ = text_to_sequence(y_train, out_vocab, maxlen=50)
 
     _, X_valid = ptb(section='wsj_24', directory='data/', column=0)
     _, y_valid = ptb(section='wsj_24', directory='data/', column=1)
-    X_valid_seq, word_to_n, _ = text_to_sequence(X_valid, in_vocab, maxlen=100)
-    y_valid_seq, _, _ = text_to_sequence(y_valid, out_vocab, maxlen=100)
+    X_valid_seq, word_to_n, _ = text_to_sequence(X_valid, in_vocab, maxlen=50)
+    y_valid_seq, _, _ = text_to_sequence(y_valid, out_vocab, maxlen=50)
     print('Done.')
 
     print('Contains %d unique words.' % len(in_vocab))
     print('Read in %d examples.' % len(X_train))
 
     print('Building model...')
-    optimizer = optimizers.Adam()
-    model = Seq2SeqAttention(input_length=100, output_length=100, vocab_size=len(in_vocab), out_vocab_size=len(out_vocab))
+    optimizer = optimizers.RMSprop()
+    model = Seq2SeqAttention(input_length=50, output_length=50, vocab_size=len(in_vocab), out_vocab_size=len(out_vocab))
     model.compile(optimizer=optimizer, loss=neg_log_likelihood, metrics=['accuracy'])
     plot_model(model, to_file='model.png')
     print('Done.')
 
     print('Training model...')
-    es = EarlyStopping(monitor='val_loss', patience=30)
+    print('Checkpointing models on validation loss...')
+    RUN = 'runs/baseline'
+    model_fn = os.path.join(RUN, 'baseline.h5')
+    cp = ModelCheckpoint(model_fn)
+    print('Checkpoints will be written to %s.' % model_fn)
+
+    es = EarlyStopping(monitor='val_loss', patience=5)
     model.fit(X_train_seq, one_hot(y_train_seq), validation_data=(X_valid_seq, one_hot(y_valid_seq)), \
-            batch_size=128, epochs=500, callbacks=[es], verbose=1)
+            batch_size=128, epochs=500, callbacks=[es, cp], verbose=1)
     print('Done.')
 
-    print('Saving models...')
-    RUN = 'baseline'
-    save_dir = os.path.join('runs/', RUN)
-    model.save(os.path.join(save_dir, 'baseline.h5'))
-    print('Done.')
