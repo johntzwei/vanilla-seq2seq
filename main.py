@@ -1,7 +1,7 @@
 import os
 import numpy as np
 
-from keras.models import Model
+from keras.models import Model, load_model
 from keras.layers import Input
 from keras.layers.core import Dense, Activation, Dropout, Lambda, \
         Masking
@@ -53,7 +53,9 @@ def neg_log_likelihood(y_true, y_pred):
 
 class AttentionLSTM(LSTM):
     def __init__(self, output_dim, output_length=100, **kwargs):
-        super(AttentionLSTM, self).__init__(output_dim, **kwargs)
+        kwargs['units'] = output_dim if 'units' not in kwargs else kwargs['units']
+        super(AttentionLSTM, self).__init__(**kwargs)
+
         self.output_length = output_length
 
     def build(self, input_shape):
@@ -100,11 +102,17 @@ class AttentionLSTM(LSTM):
         input_shape = (input_shape[0], self.output_length, input_shape[2])
         return super(AttentionLSTM, self).compute_output_shape(input_shape)
 
+    def get_config(self):
+        config = { 'output_dim' : self.units,
+                   'output_length' : self.output_length }
+        base_config = super(AttentionLSTM, self).get_config()
+        return dict(list(base_config.items()) + list(config.items()))
+
 #Grammar as a Foreign Language
 #Vinyals 2015 et al.
 #TODO incorporate hidden state
 def Seq2SeqAttention(input_length, output_length, vocab_size, out_vocab_size, 
-        encoder_hidden_dim=256, decoder_hidden_dim=256, encoder_dropout=0.5, decoder_dropout=0.5, embedding_dim=128):
+        encoder_hidden_dim=128, decoder_hidden_dim=128, encoder_dropout=0.5, decoder_dropout=0.5, embedding_dim=64):
     inputs = Input(shape=(input_length,))
     x = Masking()(inputs)
     x = Embedding(input_dim=vocab_size+1, output_dim=embedding_dim, \
@@ -167,15 +175,19 @@ if __name__ == '__main__':
     plot_model(model, to_file='model.png')
     print('Done.')
 
-    print('Training model...')
     print('Checkpointing models on validation loss...')
     RUN = 'runs/baseline'
     model_fn = os.path.join(RUN, 'baseline.h5')
     cp = ModelCheckpoint(model_fn)
     print('Checkpoints will be written to %s.' % model_fn)
 
-    es = EarlyStopping(monitor='val_loss', patience=5)
+    #loads last model
+    #model = load_model(model_fn, custom_objects={'AttentionLSTM' : AttentionLSTM, \
+    #        'neg_log_likelihood' : neg_log_likelihood })
+
+    print('Training model...')
+    es = EarlyStopping(monitor='val_loss', patience=70)
     model.fit(X_train_seq, one_hot(y_train_seq), validation_data=(X_valid_seq, one_hot(y_valid_seq)), \
-            batch_size=128, epochs=500, callbacks=[es, cp], verbose=1)
+            batch_size=128, epochs=1, callbacks=[es, cp], verbose=1)
     print('Done.')
 
