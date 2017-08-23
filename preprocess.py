@@ -32,6 +32,10 @@ def linearize(tree, label=False, token=False, margin=1000):
     lin = tree.pformat(margin=margin, nodesep='', parens=['(', ' )'])
     lin = re.sub(r'\s+', ' ', lin)
 
+    #flatten leaves
+    if not label:
+        lin = re.sub(r'\( (\S+) \)', '\\1', lin)
+
     return lin
 
 def get_vocab(fn='data/vocab', symbols=2):
@@ -64,6 +68,7 @@ if __name__ == '__main__':
     TEST_FILE = 'data/wsj_23'
     DEV_FILE = 'data/wsj_24'
     SECTIONS = [ (2, 21), (23, 23), (24, 24) ]
+    MAXLEN = 50
 
     wsj = '/data/penn_tb_3.0/TREEBANK_3/PARSED/MRG/WSJ/'
     file_pattern = r".*/WSJ_.*\.MRG"
@@ -83,7 +88,9 @@ if __name__ == '__main__':
             for sent, tree in zip(ptb.sents(fileids), ptb.parsed_sents(fileids)):
                 sent = [ normalize(word) if normalize(word) in vocab else '<unk>' for word in sent ]
                 lin = linearize(tree, token=True, label=False)
-                h.write('%s\t%s\n' % (' '.join(sent), lin))
+
+                if len(sent) < MAXLEN and len(lin.split()) < MAXLEN:
+                    h.write('%s\t%s\n' % (' '.join(sent), lin))
         h.close()
         print('Done.')
     print('Done.')
