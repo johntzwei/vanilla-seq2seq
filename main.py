@@ -169,7 +169,7 @@ if __name__ == '__main__':
     print('Read in %d examples.' % len(X_train))
 
     print('Building model...')
-    optimizer = optimizers.RMSprop()
+    optimizer = optimizers.Adam()
     model = Seq2SeqAttention(input_length=50, output_length=50, vocab_size=len(in_vocab), out_vocab_size=len(out_vocab))
     model.compile(optimizer=optimizer, loss=neg_log_likelihood, metrics=['accuracy'])
     plot_model(model, to_file='model.png')
@@ -181,13 +181,13 @@ if __name__ == '__main__':
     cp = ModelCheckpoint(model_fn)
     print('Checkpoints will be written to %s.' % model_fn)
 
-    #loads last model
+    #print('Loading last model...')
     #model = load_model(model_fn, custom_objects={'AttentionLSTM' : AttentionLSTM, \
     #        'neg_log_likelihood' : neg_log_likelihood })
+    #print('Done.')
 
     print('Training model...')
-    es = EarlyStopping(monitor='val_loss', patience=70)
     model.fit(X_train_seq, one_hot(y_train_seq), validation_data=(X_valid_seq, one_hot(y_valid_seq)), \
-            batch_size=128, epochs=1, callbacks=[es, cp], verbose=1)
+            batch_size=128, epochs=500, callbacks=[cp], verbose=1)
     print('Done.')
 
