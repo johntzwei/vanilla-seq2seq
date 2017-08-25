@@ -37,7 +37,7 @@ def text_to_sequence(texts, vocab, maxlen=30, padding='<EOS>'):
     for sent in texts:
         sequences.append([ word_to_n[word] for word in sent ])
 
-    sequences = pad_sequences(sequences, maxlen)
+    sequences = pad_sequences(sequences, maxlen, padding='post')
     return sequences, word_to_n, n_to_word
 
 def one_hot(seqs):
@@ -49,7 +49,7 @@ def one_hot(seqs):
 def neg_log_likelihood(y_true, y_pred):
     probs = multiply([y_true, y_pred])
     probs = K.sum(probs, axis=-1)
-    return K.sum(-K.log(K.epsilon()+probs))
+    return K.sum(-K.log(K.epsilon() + probs))
 
 class AttentionLSTM(LSTM):
     def __init__(self, output_dim, output_length=100, **kwargs):
@@ -116,45 +116,41 @@ def Seq2SeqAttention(input_length, output_length, vocab_size, out_vocab_size,
     inputs = Input(shape=(input_length,))
     x = Masking()(inputs)
     x = Embedding(input_dim=vocab_size+1, output_dim=embedding_dim, \
-            input_length=input_length, mask_zero=True)(inputs)
+            input_length=input_length, mask_zero=False)(inputs)
 
     x1 = LSTM(encoder_hidden_dim, input_shape=(input_length, embedding_dim), unroll=True, \
             return_sequences=True)(x)
     x1 = Dropout(encoder_dropout)(x1)
     x1 = LSTM(encoder_hidden_dim, input_shape=(input_length, embedding_dim), unroll=True, \
             return_sequences=True)(x1)
-    x1 = Dropout(encoder_dropout)(x1)
 
     x2 = LSTM(encoder_hidden_dim, input_shape=(input_length, embedding_dim), unroll=True, \
             return_sequences=True, go_backwards=True)(x)
     x2 = Dropout(encoder_dropout)(x2)
     x2 = LSTM(encoder_hidden_dim, input_shape=(input_length, embedding_dim), unroll=True, \
             return_sequences=True)(x2)
-    x2 = Dropout(encoder_dropout)(x2)
-
     encoding = Add()([x1, x2])
     
     x = AttentionLSTM(decoder_hidden_dim, output_length=output_length, return_sequences=True, \
             unroll=True, implementation=1)(encoding)
     x = Dropout(decoder_dropout)(x)                 #(None, 50, 256)
-    x = LSTM(encoder_hidden_dim, input_shape=(input_length, embedding_dim), unroll=True, \
-            return_sequences=True)(x)
-    x = Dropout(decoder_dropout)(x)                 #(None, 50, 256)
+    x = LSTM(encoder_hidden_dim, unroll=True, return_sequences=True)(x)
 
-    outputs = TimeDistributed(Dense(5, activation='softmax'))(x)
+    outputs = TimeDistributed(Dense(out_vocab_size+1, activation='softmax'))(x)
     return Model(inputs=inputs, outputs=outputs)
 
 if __name__ == '__main__':
     print('Reading vocab...')
     in_vocab = read_vocab()
     in_vocab +=  [ '<unk>', '<EOS>' ]
-
     out_vocab = ['<EOS>', '(', ')', '<TOK>' ]
     print('Done.')
 
     print('Reading train/valid data...')
     _, X_train = ptb(section='wsj_2-21', directory='data/', column=0)
     _, y_train = ptb(section='wsj_2-21', directory='data/', column=1)
+
+    X_train, y_train = X_train[:128], y_train[:128]
 
     X_train_seq, word_to_n, n_to_word = text_to_sequence(X_train, in_vocab, maxlen=50)
     y_train_seq, _, _ = text_to_sequence(y_train, out_vocab, maxlen=50)
@@ -188,6 +184,6 @@ if __name__ == '__main__':
 
     print('Training model...')
     model.fit(X_train_seq, one_hot(y_train_seq), validation_data=(X_valid_seq, one_hot(y_valid_seq)), \
-            batch_size=128, epochs=500, callbacks=[cp], verbose=1)
+            batch_size=128, epochs=200, callbacks=[cp], verbose=1)
     print('Done.')
 
