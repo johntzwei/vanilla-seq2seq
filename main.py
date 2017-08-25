@@ -81,7 +81,6 @@ class AttentionLSTM(LSTM):
 
         x1 = TimeDistributed(self.W_1)(inputs)
         x2 = self.W_2(d_tm1)
-        print('x1 %s' % str(K.int_shape(x1)))
 
         #broadcast (W_1 * H_T) + (W_2 * d->)
         x2 = K.expand_dims(x2, axis=-2)
@@ -157,8 +156,6 @@ if __name__ == '__main__':
     _, X_train = ptb(section='wsj_2-21', directory='data/', column=0)
     _, y_train = ptb(section='wsj_2-21', directory='data/', column=1)
 
-    X_train, y_train = X_train[:1], y_train[:1]
-
     X_train_seq, word_to_n, n_to_word = text_to_sequence(X_train, in_vocab, maxlen=50)
     y_train_seq, _, _ = text_to_sequence(y_train, out_vocab, maxlen=50, mask=1.)
 
@@ -191,6 +188,6 @@ if __name__ == '__main__':
 
     print('Training model...')
     model.fit(X_train_seq, one_hot(y_train_seq), validation_data=(X_valid_seq, one_hot(y_valid_seq)), \
-            batch_size=128, epochs=500, callbacks=[cp], verbose=1)
+            batch_size=32, epochs=700, callbacks=[cp], verbose=1)
     print('Done.')
 
