@@ -4,7 +4,7 @@ import numpy as np
 from keras.models import Model, load_model
 from keras.layers import Input
 from keras.layers.core import Dense, Activation, Dropout, Lambda, \
-        Masking
+        Masking, Permute
 from keras.layers.embeddings import Embedding
 from keras.layers.recurrent import LSTM
 from keras.layers.merge import Concatenate, Add, Multiply, multiply
@@ -64,7 +64,7 @@ class AttentionLSTM(LSTM):
         self.states = [None, None, None]
         self.W_1 = Dense(self.units, use_bias=False)
         self.W_2 = Dense(self.units, use_bias=False)
-        self.V = self.add_weight(shape=(self.units,), \
+        self.v = self.add_weight(shape=(self.units,), \
                 initializer='glorot_uniform', name='v')
 
     def get_constants(self, inputs, training=None):
@@ -77,22 +77,35 @@ class AttentionLSTM(LSTM):
         c_tm1 = states[1]
         d_tm1 = states[2]
         inputs = states[3]
-        batch_size = K.int_shape(inputs)[0]
-        samples = K.int_shape(inputs)[1]
+        batch_size, samples, input_dim = K.int_shape(inputs)
 
         x1 = TimeDistributed(self.W_1)(inputs)
         x2 = self.W_2(d_tm1)
-        x = Add()([x1, x2])         #broadcast
+        print('x1 %s' % str(K.int_shape(x1)))
+
+        #broadcast (W_1 * H_T) + (W_2 * d->)
+        x2 = K.expand_dims(x2, axis=-2)
+        x2 = K.repeat_elements(x2, samples, axis=-2)
+        x = Add()([x1, x2])
+        print('x2 %s' % str(K.int_shape(x2)))
+
         x = Activation('tanh')(x)
 
-        #dot product of v with each row
-        x = self.V * x              #broadcast
+        #broadcast v_t * tanh(x: (samples, input_dim))
+        v = K.expand_dims(self.v, axis=-1)
+        print('v %s' % str(K.int_shape(v)))
+        x = K.dot(x, v)
         x = K.sum(x, axis=-1)
-
         x = Activation('softmax')(x)
+        print('x %s' % str(K.int_shape(x)))
+
+        #element wise multiplication of attention vector
         a_t = K.expand_dims(x, axis=-1)
-        x = inputs * a_t          #broadcast
+        a_t = K.repeat_elements(a_t, input_dim, -1)
+        print('att %s' % str(K.int_shape(a_t)))
+        x = Multiply()([inputs, a_t])
         d_t = K.sum(x, axis=-2)
+        print('d_t %s' % str(K.int_shape(d_t)))
 
         lstm_states = [h_tm1, c_tm1] + list(states[4:])
         h, (h, c) = super(AttentionLSTM, self).step(d_t, lstm_states)      #pass in only lstm states
@@ -132,7 +145,7 @@ def Seq2SeqAttention(input_length, output_length, vocab_size, out_vocab_size,
     encoding = Add()([x1, x2])
     
     x = AttentionLSTM(decoder_hidden_dim, output_length=output_length, return_sequences=True, \
-            unroll=True, implementation=1, timesteps=output_length)(encoding)
+            unroll=False, implementation=1, timesteps=output_length)(encoding)
     x = Dropout(decoder_dropout)(x)                 #(None, 50, 256)
     x = LSTM(decoder_hidden_dim, unroll=True, return_sequences=True)(x)
     outputs = TimeDistributed(Dense(out_vocab_size+1, activation='softmax'))(x)
@@ -165,7 +178,7 @@ if __name__ == '__main__':
     print('Read in %d examples.' % len(X_train))
 
     print('Building model...')
-    optimizer = optimizers.RMSprop(lr=0.01)
+    optimizer = optimizers.Adam()
     model = Seq2SeqAttention(input_length=50, output_length=50, vocab_size=len(in_vocab), out_vocab_size=len(out_vocab))
     model.compile(optimizer=optimizer, loss=neg_log_likelihood, metrics=['accuracy'])
     plot_model(model, to_file='model.png')
