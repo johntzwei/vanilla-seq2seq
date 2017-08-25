@@ -87,25 +87,19 @@ class AttentionLSTM(LSTM):
         x2 = K.expand_dims(x2, axis=-2)
         x2 = K.repeat_elements(x2, samples, axis=-2)
         x = Add()([x1, x2])
-        print('x2 %s' % str(K.int_shape(x2)))
-
         x = Activation('tanh')(x)
 
         #broadcast v_t * tanh(x: (samples, input_dim))
         v = K.expand_dims(self.v, axis=-1)
-        print('v %s' % str(K.int_shape(v)))
         x = K.dot(x, v)
         x = K.sum(x, axis=-1)
         x = Activation('softmax')(x)
-        print('x %s' % str(K.int_shape(x)))
 
         #element wise multiplication of attention vector
         a_t = K.expand_dims(x, axis=-1)
         a_t = K.repeat_elements(a_t, input_dim, -1)
-        print('att %s' % str(K.int_shape(a_t)))
         x = Multiply()([inputs, a_t])
         d_t = K.sum(x, axis=-2)
-        print('d_t %s' % str(K.int_shape(d_t)))
 
         lstm_states = [h_tm1, c_tm1] + list(states[4:])
         h, (h, c) = super(AttentionLSTM, self).step(d_t, lstm_states)      #pass in only lstm states
