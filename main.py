@@ -12,7 +12,7 @@ from keras.layers.wrappers import TimeDistributed
 
 from keras.preprocessing.sequence import pad_sequences
 from keras import optimizers
-from keras.callbacks import EarlyStopping, ModelCheckpoint
+from keras.callbacks import EarlyStopping, ModelCheckpoint, LearningRateScheduler
 from keras.utils import plot_model
 import keras.backend as K
 
@@ -37,7 +37,7 @@ def text_to_sequence(texts, vocab, maxlen=30, padding='<EOS>', mask=0.):
     for sent in texts:
         sequences.append([ word_to_n[word] for word in sent ])
 
-    sequences = pad_sequences(sequences, maxlen, padding='post', value=mask)
+    sequences = pad_sequences(sequences, maxlen, padding='pre', value=mask)
     return sequences, word_to_n, n_to_word
 
 def one_hot(seqs):
@@ -169,7 +169,7 @@ if __name__ == '__main__':
     print('Read in %d examples.' % len(X_train))
 
     print('Building model...')
-    optimizer = optimizers.Adam()
+    optimizer = optimizers.Nadam()
     model = Seq2SeqAttention(input_length=50, output_length=50, vocab_size=len(in_vocab), out_vocab_size=len(out_vocab))
     model.compile(optimizer=optimizer, loss=neg_log_likelihood, metrics=['accuracy'])
     plot_model(model, to_file='model.png')
@@ -178,7 +178,7 @@ if __name__ == '__main__':
     print('Checkpointing models on validation loss...')
     RUN = 'runs/baseline'
     model_fn = os.path.join(RUN, 'baseline.h5')
-    cp = ModelCheckpoint(model_fn)
+    cp = ModelCheckpoint(model_fn, monitor='val_loss', save_best_only=True)
     print('Checkpoints will be written to %s.' % model_fn)
 
     #print('Loading last model...')
@@ -188,6 +188,6 @@ if __name__ == '__main__':
 
     print('Training model...')
     model.fit(X_train_seq, one_hot(y_train_seq), validation_data=(X_valid_seq, one_hot(y_valid_seq)), \
-            batch_size=32, epochs=700, callbacks=[cp], verbose=1)
+            batch_size=32, epochs=500, callbacks=[cp], verbose=1)
     print('Done.')
 
