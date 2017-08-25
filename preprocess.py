@@ -68,7 +68,7 @@ if __name__ == '__main__':
     TEST_FILE = 'data/wsj_23'
     DEV_FILE = 'data/wsj_24'
     SECTIONS = [ (2, 21), (23, 23), (24, 24) ]
-    MAXLEN = 50
+    MAXLEN = 100
 
     wsj = '/data/penn_tb_3.0/TREEBANK_3/PARSED/MRG/WSJ/'
     file_pattern = r".*/WSJ_.*\.MRG"
