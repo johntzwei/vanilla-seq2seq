@@ -112,7 +112,6 @@ if __name__ == '__main__':
     print('Reading train/valid data...')
     _, X_train = ptb(section='wsj_23', directory='data/', column=0)
     _, y_train = ptb(section='wsj_23', directory='data/', column=1)
-    X_train, y_train = X_train[:5], y_train[:5]
     X_train_seq, word_to_n, n_to_word = text_to_sequence(X_train, in_vocab)
     y_train_seq, _, _ = text_to_sequence(y_train, out_vocab, maxlen=50)
 
@@ -175,5 +174,13 @@ if __name__ == '__main__':
         print()
 
         #validation
+        print('Validating...')
+        loss = 0.
+        for X, y in zip(X_valid_seq, y_valid_seq):
+            dy.renew_cg()
+            decoding = seq2seq.one_sequence(X, len(y))
+            ex_loss = dy.esum([ dy.pickneglogsoftmax(h, i) for h, i in zip(decoding, y) ])
+            loss += ex_loss.value()
+        print('Validation loss: %f' % loss)
 
     print('Done.')
