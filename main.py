@@ -148,21 +148,15 @@ if __name__ == '__main__':
     print('Reading vocab...')
     in_vocab = read_vocab()
     in_vocab +=  [ '<unk>', '<EOS>' ]
-
-    out_vocab = ['<EOS>', '(', ')', '<TOK>' ]
     print('Done.')
 
     print('Reading train/valid data...')
     _, X_train = ptb(section='wsj_2-21', directory='data/', column=0)
-    _, y_train = ptb(section='wsj_2-21', directory='data/', column=1)
-    X_train, y_train = X_train[:100], y_train[:100]
-    X_train_seq, word_to_n, n_to_word = text_to_sequence(X_train, in_vocab, maxlen=100)
-    y_train_seq, _, _ = text_to_sequence(y_train, out_vocab, maxlen=100)
-
     _, X_valid = ptb(section='wsj_24', directory='data/', column=0)
-    _, y_valid = ptb(section='wsj_24', directory='data/', column=1)
-    X_valid_seq, word_to_n, _ = text_to_sequence(X_valid, in_vocab, maxlen=100)
-    y_valid_seq, _, _ = text_to_sequence(y_valid, out_vocab, maxlen=100)
+    _, X_test = ptb(section='wsj_23', directory='data/', column=0)
+    X = X_train + X_valid + X_test
+
+    X_train_seq, word_to_n, n_to_word = text_to_sequence(X_train, in_vocab, maxlen=100)
     print('Done.')
 
     print('Contains %d unique words.' % len(in_vocab))

@@ -46,16 +46,14 @@ def vae_lm(vocab_size=10000, input_length=30, embedding_dim=64, encoder_hidden_d
     x1 = Dropout(encoder_dropout)(x1)
     x1 = LSTM(encoder_hidden_dim, input_shape=(input_length, embedding_dim), unroll=True, \
             return_sequences=True)(x1)
-    x1 = Dropout(encoder_dropout)(x1)
 
     x2 = LSTM(encoder_hidden_dim, input_shape=(input_length, embedding_dim), unroll=True, \
             return_sequences=True, go_backwards=True)(x)
     x2 = Dropout(encoder_dropout)(x2)
     x2 = LSTM(encoder_hidden_dim, input_shape=(input_length, embedding_dim), unroll=True, \
             return_sequences=True)(x2)
-    x2 = Dropout(encoder_dropout)(x2)
 
-    x = Multiply()([x1, x2])
+    x = Add()([x1, x2])
     x = Lambda(lambda x: K.sum(x, axis=-2))(x)
 
     mu = Dense(latent_dim)(x)
@@ -65,10 +63,13 @@ def vae_lm(vocab_size=10000, input_length=30, embedding_dim=64, encoder_hidden_d
     #sum of sentence word embeddings
     x = Lambda(lambda x: K.sum(x, axis=-2))(embeddings)
     x = Concatenate(axis=-1)([x, z])
-    x = RepeatVector(input_length)(x)
 
-    x = Conv1D(filters=1, kernel_size=(1,), strides=(1,), padding='same')(x)
-    x = TimeDistributed(Activation('softmax'))(x)
+    xs = []
+    for i in range(0, input_length):
+       t = Dense(vocab_size, activation='softmax', use_bias=False)(x)
+       t = Lambda(lambda x: K.expand_dims(x, axis=-2))(t)
+       xs.append(t)
+    x = Concatenate(axis=-2)(xs)
 
     #loss calculations
     dist_loss = Lambda(kl_loss, name='dist_loss')([mu, sigma])
@@ -76,10 +77,10 @@ def vae_lm(vocab_size=10000, input_length=30, embedding_dim=64, encoder_hidden_d
             embeddings_initializer='identity', mask_zero=True, trainable=False)(masked)
     xent = Lambda(lambda x: neg_log_likelihood(x[0], x[1]), output_shape=(1,), name='xent')([one_hot, x])
     loss = Lambda(exp_annealing, output_shape=(1,))([xent, dist_loss])
-    x = CustomLossLayer()(loss)
+    x = CustomLossLayer(name='loss')(loss)
 
     encoder = Model(inputs=inputs, outputs=[mu, sigma])
-    model = Model(inputs=inputs, outputs=[xent, dist_loss])
+    model = Model(inputs=inputs, outputs=[xent, dist_loss, x])
     return encoder, model
 
 if __name__ == '__main__':
