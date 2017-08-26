@@ -183,4 +183,7 @@ if __name__ == '__main__':
             loss += ex_loss.value()
         print('Validation loss: %f' % loss)
 
+        if prev_loss == 0. or loss < prev_loss:
+            model.save(checkpoint)
+
     print('Done.')
