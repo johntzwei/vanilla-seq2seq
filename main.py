@@ -1,8 +1,11 @@
 import os
 import sys
 import time
+import random
 import numpy as np
 import dynet as dy
+
+random.seed(0)
 
 def ptb(section='test.txt', directory='ptb/', padding='<EOS>', column=0):
     with open(os.path.join(directory, section), 'rt') as fh:
@@ -26,6 +29,11 @@ def text_to_sequence(texts, vocab, maxlen=30, padding='<EOS>'):
         sequences.append([ word_to_n[word] for word in sent ])
     return sequences, word_to_n, n_to_word
 
+def sort_by_len(X, y):
+    data = list(zip(X, y))
+    data.sort(key=lambda x: -len(x[1]))
+    return [ i[0] for i in data ], [ i[1] for i in data ]
+
 class Seq2SeqAttention:
     def __init__(self, collection, vocab_size, out_vocab_size, embedding_dim=128, encoder_layers=3, decoder_layers=3, \
             encoder_hidden_dim=256, decoder_hidden_dim=256, encoder_dropout=0.5, decoder_dropout=0.5):
@@ -45,7 +53,7 @@ class Seq2SeqAttention:
         self.params['W_o'] = collection.add_parameters((out_vocab_size, decoder_hidden_dim)) 
         self.params['b_o'] = collection.add_parameters((out_vocab_size,)) 
 
-    def one_sequence(self, X, maxlen):
+    def one_sequence(self, X, maxlen, training=True):
         #params - every minibatch
         W_emb = dy.parameter(self.params['W_emb'])
         W_1 = dy.parameter(self.params['W_1'])
@@ -54,6 +62,17 @@ class Seq2SeqAttention:
         W_o = dy.parameter(self.params['W_o'])
         b_o = dy.parameter(self.params['b_o'])
         #---
+
+        if training:
+            self.encoder[0].set_dropouts(0, 0.5)
+            self.encoder[1].set_dropouts(0, 0.5)
+            self.encoder[0].set_dropouts(0, 0.5)
+            self.encoder[1].set_dropouts(0, 0.5)
+        else:
+            self.encoder[0].set_dropouts(0, 0)
+            self.encoder[1].set_dropouts(0, 0)
+            self.encoder[0].set_dropouts(0, 0)
+            self.encoder[1].set_dropouts(0, 0)
 
         #encode
         X = [ W_emb[x] for x in X ]
@@ -97,7 +116,7 @@ class Seq2SeqAttention:
         return decoding
 
     #takes logits
-    def to_sequence(decoding, out_vocab):
+    def to_sequence(self, decoding, out_vocab):
         decoding = [ dy.softmax(x) for x in decoding ]
         decoding = [ np.argmax(x.value()) for x in decoding ]
         return [ out_vocab[x] for x in decoding ]
@@ -110,10 +129,11 @@ if __name__ == '__main__':
     print('Done.')
 
     print('Reading train/valid data...')
-    _, X_train = ptb(section='wsj_23', directory='data/', column=0)
-    _, y_train = ptb(section='wsj_23', directory='data/', column=1)
+    _, X_train = ptb(section='wsj_2-21', directory='data/', column=0)
+    _, y_train = ptb(section='wsj_2-21', directory='data/', column=1)
     X_train_seq, word_to_n, n_to_word = text_to_sequence(X_train, in_vocab)
     y_train_seq, _, _ = text_to_sequence(y_train, out_vocab, maxlen=50)
+    X_train_seq, y_train_seq = sort_by_len(X_train_seq, y_train_seq)
 
     _, X_valid = ptb(section='wsj_24', directory='data/', column=0)
     _, y_valid = ptb(section='wsj_24', directory='data/', column=1)
@@ -126,7 +146,7 @@ if __name__ == '__main__':
 
     print('Checkpointing models on validation loss...')
     RUN = 'runs/baseline'
-    checkpoint = os.path.join(RUN, 'baseline.h5')
+    checkpoint = os.path.join(RUN, 'baseline.model')
     print('Checkpoints will be written to %s.' % checkpoint)
 
     print('Building model...')
@@ -139,10 +159,10 @@ if __name__ == '__main__':
 
     print('Training model...')
     EPOCHS = 1000
-    BATCH_SIZE = 1
+    BATCH_SIZE = 32
     trainer = dy.AdamTrainer(collection)
-    trainer.set_clip_threshold(10.)
 
+    prev_loss = 0.
     for epoch in range(1, EPOCHS+1):
         dy.renew_cg()
         losses = []
@@ -153,6 +173,11 @@ if __name__ == '__main__':
             decoding = seq2seq.one_sequence(X, len(y))
             ex_loss = dy.esum([ dy.pickneglogsoftmax(h, i) for h, i in zip(decoding, y) ])
             losses.append(ex_loss)
+
+            if i < 15000:
+                BATCH_SIZE = 32
+            else:
+                BATCH_SIZE = 128
 
             if i == len(X_train_seq) or i % BATCH_SIZE == 0:
                 batch_loss = dy.esum(losses)
@@ -176,14 +201,24 @@ if __name__ == '__main__':
         #validation
         print('Validating...')
         loss = 0.
-        for X, y in zip(X_valid_seq, y_valid_seq):
+        correct_toks = 0
+        total_toks = 0
+        validation = open(os.path.join(RUN, 'validation'), 'wt')
+        for X_raw, y_raw, X, y in zip(X_valid, y_valid, X_valid_seq, y_valid_seq):
             dy.renew_cg()
-            decoding = seq2seq.one_sequence(X, len(y))
+            decoding = seq2seq.one_sequence(X, len(y), training=False)
+            decoding_seq = seq2seq.to_sequence(decoding, out_vocab)
+            validation.write('%s\t%s\t%s\n' % (' '.join(X_raw), ' '.join(y_raw), ' '.join(decoding_seq)))
+
             ex_loss = dy.esum([ dy.pickneglogsoftmax(h, i) for h, i in zip(decoding, y) ])
             loss += ex_loss.value()
-        print('Validation loss: %f' % loss)
+
+            correct_toks += [ i == j for i, j in zip(decoding_seq, y_raw) ].count(True)
+            total_toks += len(y)
+        print('Validation loss: %f. Token-level accuracy: %f.' % (loss, correct_toks/total_toks))
 
         if prev_loss == 0. or loss < prev_loss:
-            model.save(checkpoint)
-
+            print('Lowest validation loss yet. Saving model...')
+            collection.save(checkpoint)
+            prev_loss = loss
     print('Done.')
