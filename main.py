@@ -1,3 +1,5 @@
+from __future__ import print_function
+
 import os
 import sys
 import time
@@ -48,20 +50,24 @@ class Seq2SeqAttention:
                 dy.LSTMBuilder(decoder_layers-1, decoder_hidden_dim, decoder_hidden_dim, collection) ]
         self.params['W_1'] = collection.add_parameters((decoder_hidden_dim, encoder_hidden_dim)) 
         self.params['W_2'] = collection.add_parameters((decoder_hidden_dim, decoder_hidden_dim)) 
-        self.params['vT'] = collection.add_parameters((1, decoder_hidden_dim)) 
+        self.params['vT'] = collection.add_parameters((1, decoder_hidden_dim,)) 
 
         self.params['W_o'] = collection.add_parameters((out_vocab_size, decoder_hidden_dim)) 
         self.params['b_o'] = collection.add_parameters((out_vocab_size,)) 
 
+    def load_params(self):
+        self.batch_params = (
+            dy.parameter(self.params['W_emb']), \
+            dy.parameter(self.params['W_1']), \
+            dy.parameter(self.params['W_2']), \
+            dy.parameter(self.params['vT']), \
+            dy.parameter(self.params['W_o']), \
+            dy.parameter(self.params['b_o']), \
+        )
+
+
     def one_sequence(self, X, maxlen, training=True):
-        #params - every minibatch
-        W_emb = dy.parameter(self.params['W_emb'])
-        W_1 = dy.parameter(self.params['W_1'])
-        W_2 = dy.parameter(self.params['W_2'])
-        vT = dy.parameter(self.params['vT'])
-        W_o = dy.parameter(self.params['W_o'])
-        b_o = dy.parameter(self.params['b_o'])
-        #---
+        W_emb, W_1, W_2, vT, W_o, b_o = self.batch_params
 
         if training:
             self.encoder[0].set_dropouts(0, 0.5)
@@ -101,9 +107,9 @@ class Seq2SeqAttention:
         state = s0
         for tok in range(0, maxlen):
             y = W_2 * state.h()[-1]
-            u_i = [ vT * dy.tanh(x + y) for x in xs ]
-            a_t = dy.softmax(dy.concatenate(u_i))
-            d_t = encoding * a_t
+            u = vT * dy.tanh(dy.concatenate_cols([ x + y for x in xs ]))
+            a_t = dy.softmax(u)
+            d_t = encoding * dy.transpose(a_t)
             
             state = state.add_input(d_t)
             hidden.append(state.h()[-1])
@@ -159,25 +165,21 @@ if __name__ == '__main__':
 
     print('Training model...')
     EPOCHS = 1000
-    BATCH_SIZE = 32
+    BATCH_SIZE = 64
     trainer = dy.AdamTrainer(collection)
 
     prev_loss = 0.
     for epoch in range(1, EPOCHS+1):
         dy.renew_cg()
+        seq2seq.load_params()
         losses = []
         start = time.time()
         loss = 0.
 
         for i, (X, y) in enumerate(zip(X_train_seq, y_train_seq), 1):
             decoding = seq2seq.one_sequence(X, len(y))
-            ex_loss = dy.esum([ dy.pickneglogsoftmax(h, i) for h, i in zip(decoding, y) ])
+            ex_loss = dy.esum([ dy.pickneglogsoftmax(h, j) for h, j in zip(decoding, y) ])
             losses.append(ex_loss)
-
-            if i < 15000:
-                BATCH_SIZE = 32
-            else:
-                BATCH_SIZE = 128
 
             if i == len(X_train_seq) or i % BATCH_SIZE == 0:
                 batch_loss = dy.esum(losses)
@@ -190,6 +192,7 @@ if __name__ == '__main__':
 
                 dy.renew_cg()
                 losses = []
+                seq2seq.load_params()
                 print('Epoch %d. Time elapsed: %ds, %d/%d. Average batch loss: %f\r' % \
                         (epoch, elapsed, i, len(X_train_seq), avg_batch_loss), end='')
 
