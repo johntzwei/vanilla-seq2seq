@@ -9,7 +9,7 @@ random.seed(0)
 import numpy as np
 import dynet_config
 dynet_config.set_gpu()
-dynet_config.set(mem=8192, random_seed=random.random())
+dynet_config.set(mem=4096, random_seed=random.randint(1, 10))
 import dynet as dy
 
 def ptb(section='test.txt', directory='ptb/', padding='<EOS>', column=0):
@@ -36,7 +36,7 @@ def text_to_sequence(texts, vocab, maxlen=30, padding='<EOS>'):
 
 def sort_by_len(X, y):
     data = list(zip(X, y))
-    data.sort(key=lambda x: -len(x[1]))
+    data.sort(key=lambda x: len(x[1]))
     return [ i[0] for i in data ], [ i[1] for i in data ]
 
 def batch(X, batch_size=128, mask=0.):
@@ -145,14 +145,19 @@ class Seq2SeqAttention:
         decoding = [  [ x[i] for x in decoding ] for i in range(0, batch_size) ]
         return [ [ out_vocab[y] for y in x ] for x in decoding ]
 
-    def one_batch(self, X_batch, y_batch, masks):
+    def one_batch(self, X_batch, y_batch, masks, training=True):
         batch_size = len(X_batch)
         X_batch = zip(*X_batch)
         y_batch = zip(*y_batch)
         masks = zip(*masks)
 
+        print('---')
+        print(X_batch)
+        print(y_batch)
+        print(masks)
+
         seq2seq.load_params()
-        decoding = seq2seq.one_sequence_batch(X_batch, len(y_batch))
+        decoding = seq2seq.one_sequence_batch(X_batch, len(y_batch), training=training)
         
         batch_loss = []
         for x, y, mask in zip(decoding, y_batch, masks):
@@ -172,22 +177,14 @@ if __name__ == '__main__':
     print('Done.')
 
     print('Reading train/valid data...')
-    BATCH_SIZE = 2
+    BATCH_SIZE = 4
     _, X_train = ptb(section='wsj_2-21', directory='data/', column=0)
     _, y_train = ptb(section='wsj_2-21', directory='data/', column=1)
     X_train_seq, word_to_n, n_to_word = text_to_sequence(X_train, in_vocab)
     y_train_seq, _, _ = text_to_sequence(y_train, out_vocab)
-    #X_train_seq, y_train_seq = sort_by_len(X_train_seq, y_train_seq)
+    X_train_seq, y_train_seq = sort_by_len(X_train_seq, y_train_seq)
     X_train_seq, X_train_masks = batch(X_train_seq, batch_size=BATCH_SIZE, mask=len(in_vocab)-1)
     y_train_seq, y_train_masks = batch(y_train_seq, batch_size=BATCH_SIZE, mask=len(in_vocab)-1)
-
-    print(len(X_train_seq[0]))
-    print(len(X_train_seq[0][0]))
-    print(X_train_seq[0])
-    print(len(X_train_masks[0][0]))
-    print(len(X_train_masks[0]))
-    print(X_train_masks[0])
-    exit()
 
     _, X_valid = ptb(section='wsj_24', directory='data/', column=0)
     _, y_valid = ptb(section='wsj_24', directory='data/', column=1)
@@ -258,7 +255,7 @@ if __name__ == '__main__':
         for i, (X_batch, y_batch, masks, X_batch_raw, y_batch_raw) in \
                 enumerate(zip(X_valid_seq, y_valid_seq, y_valid_masks, X_valid_raw, y_valid_raw), 1):
             dy.renew_cg()
-            batch_loss, decoding = seq2seq.one_batch(X_batch, y_batch, masks)
+            batch_loss, decoding = seq2seq.one_batch(X_batch, y_batch, masks, training=False)
             loss += batch_loss.value()
 
             y_pred = seq2seq.to_sequence_batch(decoding, out_vocab)
