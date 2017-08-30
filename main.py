@@ -4,10 +4,13 @@ import os
 import sys
 import time
 import random
-import numpy as np
-import dynet as dy
-
 random.seed(0)
+
+import numpy as np
+import dynet_config
+dynet_config.set_gpu()
+dynet_config.set(mem=8192, random_seed=random.random())
+import dynet as dy
 
 def ptb(section='test.txt', directory='ptb/', padding='<EOS>', column=0):
     with open(os.path.join(directory, section), 'rt') as fh:
@@ -36,15 +39,16 @@ def sort_by_len(X, y):
     data.sort(key=lambda x: -len(x[1]))
     return [ i[0] for i in data ], [ i[1] for i in data ]
 
-def batch(X, batch_size=128, mask=10001):
+def batch(X, batch_size=128, mask=0.):
     ex, masks = [], []
     for i in xrange(0, len(X), batch_size):
         X_ = X[i:i + batch_size]
         X_len = max([ len(x) for x in X_ ])
         X_padding = [ X_len - len(x) for x in X_ ]
-        X_ = [ x + [mask] * mask_len for x, mask_len  in zip(X_, X_padding) ]
+
+        X_padded = [ x + [mask] * mask_len for x, mask_len  in zip(X_, X_padding) ]
         X_mask = [ [1]*len(x)  + [0]*mask_len for x, mask_len  in zip(X_, X_padding) ]
-        ex.append(X_)
+        ex.append(X_padded)
         masks.append(X_mask)
     return ex, masks
 
@@ -79,18 +83,17 @@ class Seq2SeqAttention:
 
     def one_sequence_batch(self, X_batch, maxlen, training=True):
         W_emb, W_1, W_2, vT, W_o, b_o = self.batch_params
-        X_batch = zip(*X_batch)
 
         if training:
-            self.encoder[0].set_dropouts(0, 0.5)
-            self.encoder[1].set_dropouts(0, 0.5)
-            self.encoder[0].set_dropouts(0, 0.5)
-            self.encoder[1].set_dropouts(0, 0.5)
+            self.encoder[0].set_dropout(0.5)
+            self.encoder[1].set_dropout(0.5)
+            self.encoder[0].set_dropout(0.5)
+            self.encoder[1].set_dropout(0.5)
         else:
-            self.encoder[0].set_dropouts(0, 0)
-            self.encoder[1].set_dropouts(0, 0)
-            self.encoder[0].set_dropouts(0, 0)
-            self.encoder[1].set_dropouts(0, 0)
+            self.encoder[0].set_dropout(0)
+            self.encoder[1].set_dropout(0)
+            self.encoder[0].set_dropout(0)
+            self.encoder[1].set_dropout(0)
 
         #encode
         X = [ dy.lookup_batch(self.params['W_emb'], tok_batch) for tok_batch in X_batch ]
@@ -134,10 +137,32 @@ class Seq2SeqAttention:
         return decoding
 
     #takes logits
-    def to_sequence(self, decoding, out_vocab):
+    def to_sequence_batch(self, decoding, out_vocab):
+        batch_size = decoding[0].dim()[1]
         decoding = [ dy.softmax(x) for x in decoding ]
-        decoding = [ np.argmax(x.value()) for x in decoding ]
-        return [ out_vocab[x] for x in decoding ]
+        decoding = [ dy.reshape(x, (len(out_vocab), batch_size), batch_size=1) for x in decoding ]
+        decoding = [ np.argmax(x.value(), axis=0) for x in decoding ]
+        decoding = [  [ x[i] for x in decoding ] for i in range(0, batch_size) ]
+        return [ [ out_vocab[y] for y in x ] for x in decoding ]
+
+    def one_batch(self, X_batch, y_batch, masks):
+        batch_size = len(X_batch)
+        X_batch = zip(*X_batch)
+        y_batch = zip(*y_batch)
+        masks = zip(*masks)
+
+        seq2seq.load_params()
+        decoding = seq2seq.one_sequence_batch(X_batch, len(y_batch))
+        
+        batch_loss = []
+        for x, y, mask in zip(decoding, y_batch, masks):
+            mask_expr = dy.inputVector(mask)
+            mask = dy.reshape(mask_expr, (1,), batch_size)
+            batch_loss.append(mask * dy.pickneglogsoftmax_batch(x, y))
+        batch_loss = dy.esum(batch_loss)
+        batch_loss = dy.sum_batches(batch_loss)
+
+        return batch_loss, decoding
         
 if __name__ == '__main__':
     print('Reading vocab...')
@@ -147,19 +172,30 @@ if __name__ == '__main__':
     print('Done.')
 
     print('Reading train/valid data...')
-    BATCH_SIZE = 64
+    BATCH_SIZE = 2
     _, X_train = ptb(section='wsj_2-21', directory='data/', column=0)
     _, y_train = ptb(section='wsj_2-21', directory='data/', column=1)
     X_train_seq, word_to_n, n_to_word = text_to_sequence(X_train, in_vocab)
-    y_train_seq, _, _ = text_to_sequence(y_train, out_vocab, maxlen=100)
-    X_train_seq, y_train_seq = sort_by_len(X_train_seq, y_train_seq)
+    y_train_seq, _, _ = text_to_sequence(y_train, out_vocab)
+    #X_train_seq, y_train_seq = sort_by_len(X_train_seq, y_train_seq)
     X_train_seq, X_train_masks = batch(X_train_seq, batch_size=BATCH_SIZE, mask=len(in_vocab)-1)
     y_train_seq, y_train_masks = batch(y_train_seq, batch_size=BATCH_SIZE, mask=len(in_vocab)-1)
 
+    print(len(X_train_seq[0]))
+    print(len(X_train_seq[0][0]))
+    print(X_train_seq[0])
+    print(len(X_train_masks[0][0]))
+    print(len(X_train_masks[0]))
+    print(X_train_masks[0])
+    exit()
+
     _, X_valid = ptb(section='wsj_24', directory='data/', column=0)
     _, y_valid = ptb(section='wsj_24', directory='data/', column=1)
+    X_valid_raw, _ = batch(X_valid, batch_size=BATCH_SIZE, mask='<mask>') 
+    y_valid_raw, _ = batch(y_valid, batch_size=BATCH_SIZE, mask='<mask>')
+
     X_valid_seq, word_to_n, _ = text_to_sequence(X_valid, in_vocab)
-    y_valid_seq, _, _ = text_to_sequence(y_valid, out_vocab, maxlen=100)
+    y_valid_seq, _, _ = text_to_sequence(y_valid, out_vocab)
     X_valid_seq, y_valid_seq = sort_by_len(X_valid_seq, y_valid_seq)
     X_valid_seq, X_valid_masks = batch(X_valid_seq, batch_size=BATCH_SIZE, mask=len(in_vocab)-1) 
     y_valid_seq, y_valid_masks = batch(y_valid_seq, batch_size=BATCH_SIZE, mask=len(in_vocab)-1)
@@ -183,39 +219,30 @@ if __name__ == '__main__':
 
     print('Training model...')
     EPOCHS = 1000
-    trainer = dy.AdamTrainer(collection)
+    trainer = dy.SimpleSGDTrainer(collection, learning_rate=0.5)
 
     prev_loss = 0.
     for epoch in range(1, EPOCHS+1):
         loss = 0.
         start = time.time()
 
-        for i, (X_batch, y_batch, masks) in enumerate(zip(X_train_seq, y_train_seq, X_train_masks), 1):
+        #learning rate scheduling
+        if epoch > 15:
+            trainer.learning_rate *= 0.9
+
+        for i, (X_batch, y_batch, masks) in enumerate(zip(X_train_seq, y_train_seq, y_train_masks), 1):
             dy.renew_cg()
-            y_batch = zip(*y_batch)
-            masks = zip(*masks)
-
-            seq2seq.load_params()
-            decoding = seq2seq.one_sequence_batch(X_batch, len(y_batch[0]))
-            
-            batch_loss = []
-            for x, y, mask in zip(decoding, y_batch, masks):
-                mask_expr = dy.inputVector(mask)
-                mask = dy.reshape(mask_expr, (1,), len(X_batch))
-                batch_loss.append(mask * dy.pickneglogsoftmax_batch(x, y))
-            batch_loss = dy.esum(batch_loss)
-            batch_loss = dy.sum_batches(batch_loss)
-
-            loss += batch_loss.value()
+            batch_loss, _ = seq2seq.one_batch(X_batch, y_batch, masks)
             batch_loss.backward()
             trainer.update()
 
             elapsed = time.time() - start
             loss += batch_loss.value()
             avg_batch_loss = loss / i
+            ex = min(len(X_train), i * BATCH_SIZE)
 
             print('Epoch %d. Time elapsed: %ds, %d/%d. Average batch loss: %f\r' % \
-                    (epoch, elapsed, i*BATCH_SIZE, len(X_train), avg_batch_loss), end='')
+                    (epoch, elapsed, ex, len(X_train), avg_batch_loss), end='')
 
         print()
         print('Done. Total loss: %f' % loss)
@@ -224,22 +251,24 @@ if __name__ == '__main__':
 
         print('Validating...')
         loss = 0.
-        correct_toks = 0
-        total_toks = 0
+        correct_toks = 0.
+        total_toks = 0.
 
         validation = open(os.path.join(RUN, 'validation'), 'wt')
-        for X_raw, y_raw, X, y in zip(X_valid, y_valid, X_valid_seq, y_valid_seq):
+        for i, (X_batch, y_batch, masks, X_batch_raw, y_batch_raw) in \
+                enumerate(zip(X_valid_seq, y_valid_seq, y_valid_masks, X_valid_raw, y_valid_raw), 1):
             dy.renew_cg()
-            decoding = seq2seq.one_sequence(X, len(y), training=False)
-            decoding_seq = seq2seq.to_sequence(decoding, out_vocab)
-            validation.write('%s\t%s\t%s\n' % (' '.join(X_raw), ' '.join(y_raw), ' '.join(decoding_seq)))
+            batch_loss, decoding = seq2seq.one_batch(X_batch, y_batch, masks)
+            loss += batch_loss.value()
 
-            ex_loss = dy.esum([ dy.pickneglogsoftmax(h, i) for h, i in zip(decoding, y) ])
-            loss += ex_loss.value()
+            y_pred = seq2seq.to_sequence_batch(decoding, out_vocab)
+            for X_raw, y_raw, y_ in zip(X_batch_raw, y_batch_raw, y_pred):
+                validation.write('%s\t%s\t%s\n' % (' '.join(X_raw), ' '.join(y_raw), ' '.join(y_)))
+                correct_toks += [ y_tok == true_tok for y_tok, true_tok in zip(y_, y_raw) ].count(True)
+                total_toks += len(y_raw)
 
-            correct_toks += [ i == j for i, j in zip(decoding_seq, y_raw) ].count(True)
-            total_toks += len(y)
         print('Validation loss: %f. Token-level accuracy: %f.' % (loss, correct_toks/total_toks))
+        validation.close()
 
         if prev_loss == 0. or loss < prev_loss:
             print('Lowest validation loss yet. Saving model...')
