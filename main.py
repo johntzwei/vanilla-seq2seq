@@ -151,10 +151,10 @@ class Seq2SeqAttention:
         y_batch = zip(*y_batch)
         masks = zip(*masks)
 
-        print('---')
-        print(X_batch)
-        print(y_batch)
-        print(masks)
+        #print('---')
+        #print(X_batch)
+        #print(y_batch)
+        #print(masks)
 
         seq2seq.load_params()
         decoding = seq2seq.one_sequence_batch(X_batch, len(y_batch), training=training)
@@ -177,23 +177,23 @@ if __name__ == '__main__':
     print('Done.')
 
     print('Reading train/valid data...')
-    BATCH_SIZE = 4
+    BATCH_SIZE = 64
     _, X_train = ptb(section='wsj_2-21', directory='data/', column=0)
     _, y_train = ptb(section='wsj_2-21', directory='data/', column=1)
+    X_train, y_train = sort_by_len(X_train, y_train)
     X_train_seq, word_to_n, n_to_word = text_to_sequence(X_train, in_vocab)
     y_train_seq, _, _ = text_to_sequence(y_train, out_vocab)
-    X_train_seq, y_train_seq = sort_by_len(X_train_seq, y_train_seq)
     X_train_seq, X_train_masks = batch(X_train_seq, batch_size=BATCH_SIZE, mask=len(in_vocab)-1)
     y_train_seq, y_train_masks = batch(y_train_seq, batch_size=BATCH_SIZE, mask=len(in_vocab)-1)
 
     _, X_valid = ptb(section='wsj_24', directory='data/', column=0)
     _, y_valid = ptb(section='wsj_24', directory='data/', column=1)
+    X_valid, y_valid = sort_by_len(X_valid, y_valid)
     X_valid_raw, _ = batch(X_valid, batch_size=BATCH_SIZE, mask='<mask>') 
     y_valid_raw, _ = batch(y_valid, batch_size=BATCH_SIZE, mask='<mask>')
 
     X_valid_seq, word_to_n, _ = text_to_sequence(X_valid, in_vocab)
     y_valid_seq, _, _ = text_to_sequence(y_valid, out_vocab)
-    X_valid_seq, y_valid_seq = sort_by_len(X_valid_seq, y_valid_seq)
     X_valid_seq, X_valid_masks = batch(X_valid_seq, batch_size=BATCH_SIZE, mask=len(in_vocab)-1) 
     y_valid_seq, y_valid_masks = batch(y_valid_seq, batch_size=BATCH_SIZE, mask=len(in_vocab)-1)
     print('Done.')
