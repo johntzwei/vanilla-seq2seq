@@ -25,10 +25,9 @@ def read_vocab(vocab='vocab', directory='data/'):
         vocab = [ i.strip().split('\t')[0] for i in fh ]
     return vocab
 
-def text_to_sequence(texts, vocab, maxlen=30, padding='<EOS>'):
+def text_to_sequence(texts, vocab):
     word_to_n = { word : i for i, word in enumerate(vocab, 0) }
     n_to_word = { i : word for word, i in word_to_n.items() }
-
     sequences = []
     for sent in texts:
         sequences.append([ word_to_n[word] for word in sent ])
@@ -45,7 +44,6 @@ def batch(X, batch_size=128, mask=0.):
         X_ = X[i:i + batch_size]
         X_len = max([ len(x) for x in X_ ])
         X_padding = [ X_len - len(x) for x in X_ ]
-
         X_padded = [ x + [mask] * mask_len for x, mask_len  in zip(X_, X_padding) ]
         X_mask = [ [1]*len(x)  + [0]*mask_len for x, mask_len  in zip(X_, X_padding) ]
         ex.append(X_padded)
@@ -60,7 +58,7 @@ class Seq2SeqAttention:
 
         self.params['W_emb'] = collection.add_lookup_parameters((vocab_size, embedding_dim))
         self.encoder = [ dy.LSTMBuilder(encoder_layers, embedding_dim, encoder_hidden_dim, collection), \
-                dy.LSTMBuilder(decoder_layers, embedding_dim, decoder_hidden_dim, collection) ]
+                dy.LSTMBuilder(encoder_layers, embedding_dim, encoder_hidden_dim, collection) ]
 
         self.decoder = [ dy.LSTMBuilder(1, encoder_hidden_dim, decoder_hidden_dim, collection), \
                 dy.LSTMBuilder(decoder_layers-1, decoder_hidden_dim, decoder_hidden_dim, collection) ]
@@ -68,32 +66,28 @@ class Seq2SeqAttention:
         self.params['W_2'] = collection.add_parameters((decoder_hidden_dim, decoder_hidden_dim)) 
         self.params['vT'] = collection.add_parameters((1, decoder_hidden_dim,)) 
 
-        self.params['W_o'] = collection.add_parameters((out_vocab_size, decoder_hidden_dim)) 
-        self.params['b_o'] = collection.add_parameters((out_vocab_size,)) 
-
-    def load_params(self):
-        self.batch_params = (
-            self.params['W_emb'], \
-            dy.parameter(self.params['W_1']), \
-            dy.parameter(self.params['W_2']), \
-            dy.parameter(self.params['vT']), \
-            dy.parameter(self.params['W_o']), \
-            dy.parameter(self.params['b_o']), \
-        )
+        self.params['R'] = collection.add_parameters((out_vocab_size, decoder_hidden_dim)) 
+        self.params['b'] = collection.add_parameters((out_vocab_size,)) 
 
     def one_sequence_batch(self, X_batch, maxlen, training=True):
-        W_emb, W_1, W_2, vT, W_o, b_o = self.batch_params
+        #params
+        W_emb = self.params['W_emb']
+        W_1 = dy.parameter(self.params['W_1'])
+        W_2 = dy.parameter(self.params['W_2'])
+        vT = dy.parameter(self.params['vT'])
+        R = dy.parameter(self.params['R'])
+        b = dy.parameter(self.params['b'])
 
         if training:
-            self.encoder[0].set_dropout(0.5)
-            self.encoder[1].set_dropout(0.5)
-            self.encoder[0].set_dropout(0.5)
-            self.encoder[1].set_dropout(0.5)
+            self.encoder[0].set_dropouts(0.5, 0)
+            self.encoder[1].set_dropouts(0.5, 0)
+            self.decoder[0].set_dropouts(0, 0)
+            self.decoder[1].set_dropouts(0.5, 0)
         else:
             self.encoder[0].set_dropout(0)
             self.encoder[1].set_dropout(0)
-            self.encoder[0].set_dropout(0)
-            self.encoder[1].set_dropout(0)
+            self.decoder[0].set_dropout(0)
+            self.decoder[1].set_dropout(0)
 
         #encode
         X = [ dy.lookup_batch(self.params['W_emb'], tok_batch) for tok_batch in X_batch ]
@@ -133,7 +127,7 @@ class Seq2SeqAttention:
         hidden = s0.transduce(hidden)
 
         #logits
-        decoding = [ dy.affine_transform([b_o, W_o, h_i]) for h_i in hidden ]
+        decoding = [ dy.affine_transform([b, R, h_i]) for h_i in hidden ]
         return decoding
 
     #takes logits
@@ -151,7 +145,6 @@ class Seq2SeqAttention:
         y_batch = zip(*y_batch)
         masks = zip(*masks)
 
-        seq2seq.load_params()
         decoding = seq2seq.one_sequence_batch(X_batch, len(y_batch), training=training)
         
         batch_loss = []
@@ -210,7 +203,7 @@ if __name__ == '__main__':
     EPOCHS = 1000
     trainer = dy.AdamTrainer(collection)
 
-    prev_loss = 0.
+    lowest_val_loss = 0.
     for epoch in range(1, EPOCHS+1):
         loss = 0.
         start = time.time()
