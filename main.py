@@ -9,7 +9,7 @@ random.seed(0)
 import numpy as np
 import dynet_config
 dynet_config.set_gpu()
-dynet_config.set(mem=4096, random_seed=random.randint(1, 10))
+dynet_config.set(mem=8192, random_seed=random.randint(1, 100))
 import dynet as dy
 
 def ptb(section='test.txt', directory='ptb/', padding='<EOS>', column=0):
@@ -151,11 +151,6 @@ class Seq2SeqAttention:
         y_batch = zip(*y_batch)
         masks = zip(*masks)
 
-        #print('---')
-        #print(X_batch)
-        #print(y_batch)
-        #print(masks)
-
         seq2seq.load_params()
         decoding = seq2seq.one_sequence_batch(X_batch, len(y_batch), training=training)
         
@@ -211,12 +206,9 @@ if __name__ == '__main__':
     seq2seq = Seq2SeqAttention(collection, len(in_vocab), len(out_vocab))
     print('Done.')
 
-    #print('Loading last model...')
-    #print('Done.')
-
     print('Training model...')
     EPOCHS = 1000
-    trainer = dy.SimpleSGDTrainer(collection, learning_rate=0.5)
+    trainer = dy.AdamTrainer(collection)
 
     prev_loss = 0.
     for epoch in range(1, EPOCHS+1):
@@ -224,8 +216,8 @@ if __name__ == '__main__':
         start = time.time()
 
         #learning rate scheduling
-        if epoch > 15:
-            trainer.learning_rate *= 0.9
+        #if epoch > 8:
+        #    trainer.learning_rate *= 0.99
 
         for i, (X_batch, y_batch, masks) in enumerate(zip(X_train_seq, y_train_seq, y_train_masks), 1):
             dy.renew_cg()
@@ -261,15 +253,16 @@ if __name__ == '__main__':
             y_pred = seq2seq.to_sequence_batch(decoding, out_vocab)
             for X_raw, y_raw, y_ in zip(X_batch_raw, y_batch_raw, y_pred):
                 validation.write('%s\t%s\t%s\n' % (' '.join(X_raw), ' '.join(y_raw), ' '.join(y_)))
-                correct_toks += [ y_tok == true_tok for y_tok, true_tok in zip(y_, y_raw) ].count(True)
-                total_toks += len(y_raw)
+                correct_toks += [ tok_ == tok for tok, tok_ in zip(y_, y_raw) ].count(True)
+                total_toks += len(y_)
 
         print('Validation loss: %f. Token-level accuracy: %f.' % (loss, correct_toks/total_toks))
         validation.close()
 
-        if prev_loss == 0. or loss < prev_loss:
+        if lowest_val_loss == 0. or loss < lowest_val_loss:
             print('Lowest validation loss yet. Saving model...')
             collection.save(checkpoint)
-            prev_loss = loss
+            lowest_val_loss = loss
         print('Done.')
+
     print('Done.')
