@@ -126,6 +126,9 @@ class Seq2SeqAttention:
         state = s0
         for tok in range(0, maxlen):
             y = W_2 * state.h()[-1]
+            if training:
+                y = dy.dropout(y, self.attention_dropout)
+
             u = vT * dy.tanh(dy.concatenate_cols([ x + y for x in xs ]))
             a_t = dy.softmax(u)
             d_t = encoding * dy.transpose(a_t)
@@ -191,6 +194,7 @@ if __name__ == '__main__':
 
     _, X_valid = ptb(section='wsj_24', directory='data/', column=0)
     _, y_valid = ptb(section='wsj_24', directory='data/', column=1)
+    X_valid, y_valid = X_train[:100], y_train[:100]
     X_valid, y_valid = sort_by_len(X_valid, y_valid)
     X_valid_raw, _ = batch(X_valid, batch_size=BATCH_SIZE, mask='<mask>') 
     y_valid_raw, _ = batch(y_valid, batch_size=BATCH_SIZE, mask='<mask>')
@@ -269,12 +273,12 @@ if __name__ == '__main__':
 
         if lowest_val_loss == 0. or loss < lowest_val_loss:
             print('Lowest validation loss yet. Saving model...')
-            collection.save(checkpoint)
+            #collection.save(checkpoint)
             lowest_val_loss = loss
 
         if highest_val_accuracy == 0. or accuracy > highest_val_accuracy:
             print('Highest accuracy yet. Saving model...')
-            collection.save(checkpoint)
+            #collection.save(checkpoint)
             highest_val_accuracy = accuracy
         print('Done.')
 
