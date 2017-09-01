@@ -55,7 +55,7 @@ def batch(X, batch_size, mask=0.):
 
 class Seq2SeqAttention:
     def __init__(self, collection, vocab_size, out_vocab_size, embedding_dim=128, encoder_layers=3, decoder_layers=3, \
-            encoder_hidden_dim=256, decoder_hidden_dim=256, encoder_dropout=0.3, decoder_dropout=0.3):
+            encoder_hidden_dim=256, decoder_hidden_dim=256, encoder_dropout=0.3, decoder_dropout=0.3, attention_dropout=0.3):
         self.collection = collection
         self.params = {}
 
@@ -74,6 +74,7 @@ class Seq2SeqAttention:
 
         self.encoder_dropout = encoder_dropout
         self.decoder_dropout = decoder_dropout
+        self.attention_dropout = attention_dropout
 
     def one_sequence_batch(self, X_batch, X_reverse, maxlen, X_masks, training=True):
         #params
@@ -114,6 +115,9 @@ class Seq2SeqAttention:
 
         #decode
         xs = [ W_1 * h_i for h_i in encoding ]
+        if training:
+            xs = [ dy.dropout(x, self.attention_dropout) for x in xs ]
+
         encoding = dy.concatenate_cols(encoding)
         c_0, h_0 = hidden_state[0], hidden_state[3]     #dependent on layers
         s0 = self.decoder[0].initial_state(vecs=[c_0, h_0])
@@ -175,9 +179,10 @@ if __name__ == '__main__':
     print('Done.')
 
     print('Reading train/valid data...')
-    BATCH_SIZE = 4
+    BATCH_SIZE = 1
     _, X_train = ptb(section='wsj_2-21', directory='data/', column=0)
     _, y_train = ptb(section='wsj_2-21', directory='data/', column=1)
+    X_train, y_train = X_train[:100], y_train[:100]
     X_train, y_train = sort_by_len(X_train, y_train)
     X_train_seq, word_to_n, n_to_word = text_to_sequence(X_train, in_vocab)
     y_train_seq, _, _ = text_to_sequence(y_train, out_vocab)
@@ -214,14 +219,11 @@ if __name__ == '__main__':
 
     print('Training model...')
     EPOCHS = 1000
-    trainer = dy.AdamTrainer(collection, alpha=0.1, beta_1=0.85, beta_2=0.997)
+    trainer = dy.AdamTrainer(collection, alpha=0.05, beta_1=0.9, beta_2=0.98)
 
     for epoch in range(1, EPOCHS+1):
         loss = 0.
         start = time.time()
-
-        #learning rate scheduling
-        trainer.learning_rate *= 0.99
 
         for i, (X_batch, y_batch, X_masks, y_masks) in \
                 enumerate(zip(X_train_seq, y_train_seq, X_train_masks, y_train_masks), 1):
@@ -249,10 +251,10 @@ if __name__ == '__main__':
         total_toks = 0.
 
         validation = open(os.path.join(RUN, 'validation'), 'wt')
-        for i, (X_batch, y_batch, masks, X_batch_raw, y_batch_raw) in \
-                enumerate(zip(X_valid_seq, y_valid_seq, y_valid_masks, X_valid_raw, y_valid_raw), 1):
+        for i, (X_batch, y_batch, X_masks, y_masks, X_batch_raw, y_batch_raw) in \
+                enumerate(zip(X_valid_seq, y_valid_seq, X_valid_masks, y_valid_masks, X_valid_raw, y_valid_raw), 1):
             dy.renew_cg()
-            batch_loss, decoding = seq2seq.one_batch(X_batch, y_batch, masks, training=False)
+            batch_loss, decoding = seq2seq.one_batch(X_batch, y_batch, X_masks, y_masks, training=False)
             loss += batch_loss.value()
 
             y_pred = seq2seq.to_sequence_batch(decoding, out_vocab)
