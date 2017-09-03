@@ -11,7 +11,6 @@ import dynet_config
 dynet_config.set_gpu()
 dynet_config.set(mem=8192, \
         random_seed=random.randint(1, 100),
-        weight_decay=0.01
     )
 import dynet as dy
 
@@ -182,10 +181,9 @@ if __name__ == '__main__':
     print('Done.')
 
     print('Reading train/valid data...')
-    BATCH_SIZE = 1
+    BATCH_SIZE = 128
     _, X_train = ptb(section='wsj_2-21', directory='data/', column=0)
     _, y_train = ptb(section='wsj_2-21', directory='data/', column=1)
-    X_train, y_train = X_train[:100], y_train[:100]
     X_train, y_train = sort_by_len(X_train, y_train)
     X_train_seq, word_to_n, n_to_word = text_to_sequence(X_train, in_vocab)
     y_train_seq, _, _ = text_to_sequence(y_train, out_vocab)
@@ -194,7 +192,6 @@ if __name__ == '__main__':
 
     _, X_valid = ptb(section='wsj_24', directory='data/', column=0)
     _, y_valid = ptb(section='wsj_24', directory='data/', column=1)
-    X_valid, y_valid = X_train[:100], y_train[:100]
     X_valid, y_valid = sort_by_len(X_valid, y_valid)
     X_valid_raw, _ = batch(X_valid, batch_size=BATCH_SIZE, mask='<mask>') 
     y_valid_raw, _ = batch(y_valid, batch_size=BATCH_SIZE, mask='<mask>')
@@ -223,7 +220,8 @@ if __name__ == '__main__':
 
     print('Training model...')
     EPOCHS = 1000
-    trainer = dy.AdamTrainer(collection, alpha=0.05, beta_1=0.9, beta_2=0.98)
+    trainer = dy.AdamTrainer(collection)
+    trainer.set_clip_threshold(5.0)
 
     for epoch in range(1, EPOCHS+1):
         loss = 0.
