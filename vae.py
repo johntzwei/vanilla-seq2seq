@@ -9,7 +9,7 @@ from keras.layers.embeddings import Embedding
 from keras.layers.recurrent import LSTM
 from keras.layers.convolutional import Conv1D
 from keras.layers.wrappers import TimeDistributed
-from keras.layers.merge import Concatenate, Add, Multiply
+from keras.layers.merge import Concatenate, Add, multiply
 
 from keras.utils import plot_model
 import keras.backend as K
@@ -31,7 +31,7 @@ def kl_loss(x):
     mu, sigma = x[0], x[1]
     return -0.5 * K.sum(1 + K.log(K.epsilon()+sigma) - K.square(mu) - sigma)
 
-def vae_lm(vocab_size=10000, input_length=30, embedding_dim=64, encoder_hidden_dim=128, \
+def vae_lm(vocab_size=10000, input_length=100, embedding_dim=64, encoder_hidden_dim=128, \
         decoder_hidden_dim=128, latent_dim=64, encoder_dropout=0.5):
     inputs = Input(shape=(input_length,))
     masked = Masking()(inputs)
@@ -46,9 +46,15 @@ def vae_lm(vocab_size=10000, input_length=30, embedding_dim=64, encoder_hidden_d
     x1 = Dropout(encoder_dropout)(x1)
     x1 = LSTM(encoder_hidden_dim, input_shape=(input_length, embedding_dim), unroll=True, \
             return_sequences=True)(x1)
+    x1 = Dropout(encoder_dropout)(x1)
+    x1 = LSTM(encoder_hidden_dim, input_shape=(input_length, embedding_dim), unroll=True, \
+            return_sequences=True)(x1)
 
     x2 = LSTM(encoder_hidden_dim, input_shape=(input_length, embedding_dim), unroll=True, \
             return_sequences=True, go_backwards=True)(x)
+    x2 = Dropout(encoder_dropout)(x2)
+    x2 = LSTM(encoder_hidden_dim, input_shape=(input_length, embedding_dim), unroll=True, \
+            return_sequences=True)(x2)
     x2 = Dropout(encoder_dropout)(x2)
     x2 = LSTM(encoder_hidden_dim, input_shape=(input_length, embedding_dim), unroll=True, \
             return_sequences=True)(x2)
@@ -61,15 +67,12 @@ def vae_lm(vocab_size=10000, input_length=30, embedding_dim=64, encoder_hidden_d
     z = Lambda(lambda x: x[0] + x[1] * K.random_normal(shape=(latent_dim,), mean=0., stddev=1.))([mu, sigma])
 
     #sum of sentence word embeddings
-    x = Lambda(lambda x: K.sum(x, axis=-2))(embeddings)
+    x = Lambda(lambda x: K.sum(x, axis=-1))(embeddings)
     x = Concatenate(axis=-1)([x, z])
+    x = RepeatVector(input_length)(x)
 
-    xs = []
-    for i in range(0, input_length):
-       t = Dense(vocab_size, activation='softmax', use_bias=False)(x)
-       t = Lambda(lambda x: K.expand_dims(x, axis=-2))(t)
-       xs.append(t)
-    x = Concatenate(axis=-2)(xs)
+    x = LSTM(decoder_hidden_dim, input_shape=(input_length, embedding_dim), unroll=True, \
+            return_sequences=True)(x)
 
     #loss calculations
     dist_loss = Lambda(kl_loss, name='dist_loss')([mu, sigma])
