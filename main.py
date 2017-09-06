@@ -9,7 +9,7 @@ random.seed(0)
 import numpy as np
 import dynet_config
 dynet_config.set_gpu()
-dynet_config.set(mem=8192, \
+dynet_config.set(mem=4096, \
         random_seed=random.randint(1, 100),
     )
 import dynet as dy
@@ -218,10 +218,14 @@ if __name__ == '__main__':
     seq2seq = Seq2SeqAttention(collection, len(in_vocab), len(out_vocab))
     print('Done.')
 
+    print('Loading model...')
+    collection.populate(checkpoint)
+    print('Done.')
+
     print('Training model...')
-    EPOCHS = 1000
+    EPOCHS = 3000
     trainer = dy.AdamTrainer(collection)
-    trainer.set_clip_threshold(5.0)
+    trainer.set_clip_threshold(50.0)
 
     for epoch in range(1, EPOCHS+1):
         loss = 0.
@@ -271,12 +275,12 @@ if __name__ == '__main__':
 
         if lowest_val_loss == 0. or loss < lowest_val_loss:
             print('Lowest validation loss yet. Saving model...')
-            #collection.save(checkpoint)
+            collection.save(checkpoint)
             lowest_val_loss = loss
 
         if highest_val_accuracy == 0. or accuracy > highest_val_accuracy:
             print('Highest accuracy yet. Saving model...')
-            #collection.save(checkpoint)
+            collection.save(checkpoint)
             highest_val_accuracy = accuracy
         print('Done.')
 
