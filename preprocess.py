@@ -15,6 +15,25 @@ def linearize(tree, label=False, token=False, margin=1000):
         tree.set_label('')
         for subtree in tree.subtrees():
             subtree.set_label('')
+    else:
+        def norm(label):
+            chars = ['-', '=', '|', '$']
+            punct = ['``', "''" , '.', ',']
+            for char in chars:
+                if char in label:
+                    label = label[:label.index(char)]
+
+            if label in punct:
+                return 'PUNCT'
+
+            return label
+
+        label = tree.label()
+        tree.set_label(norm(label))
+
+        for subtree in tree.subtrees():
+            label = norm(subtree.label())
+            subtree.set_label(label)
 
     for subtree in tree.subtrees(filter=lambda x: x.height() == 2):
         leaf = normalize(subtree[0])
@@ -59,6 +78,21 @@ def get_vocab(fn='data/vocab', symbols=2):
     vocab = [ i[0] for i in vocab ]
     return vocab
 
+def get_out_vocab(out='data/out_vocab'):
+    out_vocab = set()
+    for fn, sections in zip([ TRAIN_FILE, TEST_FILE, DEV_FILE ], SECTIONS):
+        for line in open(fn, 'rt'):
+            tree = line.split('\t')[-1]
+            toks = tree.split()
+            [ out_vocab.add(tok) for tok in toks ]
+    out_vocab = list(out_vocab)
+
+    h = open(out, 'wt')
+    for tok in out_vocab:
+        h.write('%s\n' % tok)
+
+    return out_vocab
+
 if __name__ == '__main__':
     TRAIN_FILE = 'data/wsj_2-21'
     TEST_FILE = 'data/wsj_23'
@@ -82,8 +116,12 @@ if __name__ == '__main__':
             fileids = [ i for i in ptb.fileids() if i.startswith(str(section).zfill(2)) ]
             for sent, tree in zip(ptb.sents(fileids), ptb.parsed_sents(fileids)):
                 sent = [ normalize(word) if normalize(word) in vocab else '<unk>' for word in sent ]
-                lin = linearize(tree, token=True, label=False)
+                lin = linearize(tree, token=True, label=True)
                 h.write('%s\t%s\n' % (' '.join(sent), lin))
         h.close()
         print('Done.')
+    print('Done.')
+
+    print('Generating output vocabulary...')
+    out_vocab = get_out_vocab()
     print('Done.')
