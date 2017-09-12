@@ -17,14 +17,20 @@ def linearize(tree, label=False, token=False, margin=1000):
             subtree.set_label('')
     else:
         def norm(label):
-            chars = ['-', '=', '|', '$']
-            punct = ['``', "''" , '.', ',']
+            punct = ['``', "''" , '.', ',', ':']
+            if label in punct:
+                return 'PUNCT'
+            
+            if label == '$':
+                return label
+
+            if label == '-RRB-' or label == '-LRB-' or label == '-NONE-':
+                return label
+
+            chars = ['$', '|', '-', '=']
             for char in chars:
                 if char in label:
                     label = label[:label.index(char)]
-
-            if label in punct:
-                return 'PUNCT'
 
             return label
 
