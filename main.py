@@ -7,11 +7,6 @@ import random
 random.seed(0)
 
 import numpy as np
-import dynet_config
-dynet_config.set_gpu()
-dynet_config.set(mem=4096, \
-        random_seed=random.randint(1, 100),
-    )
 import dynet as dy
 
 from model import VAE_LSTM
@@ -58,11 +53,12 @@ if __name__ == '__main__':
     print('Reading vocab...')
     in_vocab = read_vocab()
     in_vocab +=  ['<unk>', '<EOS>', '<mask>']
-    out_vocab = ['(', ')', '<TOK>', '<EOS>']
+    out_vocab = read_vocab(vocab='out_vocab')
+    out_vocab +=  ['<EOS>', '<mask>']
     print('Done.')
 
     print('Reading train/valid data...')
-    BATCH_SIZE = 64
+    BATCH_SIZE = 128
     _, X_train = ptb(section='wsj_2-21', directory='data/', column=0)
     _, y_train = ptb(section='wsj_2-21', directory='data/', column=1)
     X_train, y_train = sort_by_len(X_train, y_train)
@@ -99,14 +95,14 @@ if __name__ == '__main__':
     seq2seq = VAE_LSTM(collection, len(in_vocab), len(out_vocab))
     print('Done.')
 
-    #print('Loading model...')
-    #collection.populate(checkpoint)
-    #print('Done.')
+    print('Loading model...')
+    collection.populate(checkpoint)
+    print('Done.')
 
     print('Training model...')
     EPOCHS = 3000
-    trainer = dy.AdamTrainer(collection)
-    trainer.set_clip_threshold(200.0)
+    trainer = dy.SimpleSGDTrainer(collection, learning_rate=0.1)
+    trainer.set_clip_threshold(500.)
 
     for epoch in range(1, EPOCHS+1):
         loss = 0.
@@ -116,7 +112,8 @@ if __name__ == '__main__':
                 enumerate(zip(X_train_seq, y_train_seq, X_train_masks, y_train_masks), 1):
             dy.renew_cg()
             batch_loss, kl_loss, _ = seq2seq.one_batch(X_batch, y_batch, X_masks, y_masks)
-            calc_loss = batch_loss + dy.exp(-dy.nobackprop(batch_loss)) * kl_loss 
+            #calc_loss = batch_loss + dy.exp(-dy.nobackprop(batch_loss)) * kl_loss 
+            calc_loss = batch_loss
             calc_loss.backward()
             trainer.update()
 

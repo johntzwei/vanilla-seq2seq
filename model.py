@@ -3,7 +3,7 @@ import numpy as np
 
 class VAE_LSTM:
     def __init__(self, collection, vocab_size, out_vocab_size, embedding_dim=128, encoder_layers=3, decoder_layers=3, \
-            encoder_hidden_dim=512, decoder_hidden_dim=512, latent_dim=128, encoder_dropout=0., decoder_dropout=0.):
+            encoder_hidden_dim=256, decoder_hidden_dim=256, latent_dim=128, encoder_dropout=0., decoder_dropout=0.):
         self.collection = collection
         self.params = {}
 
