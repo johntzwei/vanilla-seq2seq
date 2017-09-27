@@ -9,8 +9,9 @@ random.seed(0)
 import _gdynet as dy
 dy_params = dy.DynetParams()
 dy_params.set_random_seed(random.randint(0, 1000))
+dy_params.set_autobatch(True)
 dy_params.set_requested_gpus(1)
-dy_params.set_weight_decay(0.001)
+dy_params.set_mem(20480)
 dy_params.init()
 
 import numpy as np
@@ -65,29 +66,42 @@ if __name__ == '__main__':
     print('Done.')
 
     print('Reading train/valid data...')
-    BATCH_SIZE = 1
+    BATCH_SIZE = 128
+    VALID_BATCH_SIZE = 32
     _, X_train = ptb(section='wsj_2-21', directory='data/', column=0)
     _, y_train = ptb(section='wsj_2-21', directory='data/', column=1)
     X_train, y_train = sort_by_len(X_train, y_train)
+    X_train, y_train = X_train[30:], y_train[30:]           #throw away the really long examples
     X_train_seq, word_to_n, n_to_word = text_to_sequence(X_train, in_vocab)
     y_train_seq, _, _ = text_to_sequence(y_train, out_vocab)
     X_train_seq, X_train_masks = batch(X_train_seq, batch_size=BATCH_SIZE, mask=len(in_vocab)-1)
-    y_train_seq, y_train_masks = batch(y_train_seq, batch_size=BATCH_SIZE, mask=len(in_vocab)-1)
+    y_train_seq, y_train_masks = batch(y_train_seq, batch_size=BATCH_SIZE, mask=len(out_vocab)-1)
 
     _, X_valid = ptb(section='wsj_24', directory='data/', column=0)
     _, y_valid = ptb(section='wsj_24', directory='data/', column=1)
+    #X_valid, y_valid = X_train, y_train
     X_valid, y_valid = sort_by_len(X_valid, y_valid)
-    X_valid_raw, _ = batch(X_valid, batch_size=BATCH_SIZE, mask='<mask>') 
-    y_valid_raw, _ = batch(y_valid, batch_size=BATCH_SIZE, mask='<mask>')
+    X_valid_raw, _ = batch(X_valid, batch_size=VALID_BATCH_SIZE, mask='<mask>') 
+    y_valid_raw, _ = batch(y_valid, batch_size=VALID_BATCH_SIZE, mask='<mask>')
 
     X_valid_seq, word_to_n, _ = text_to_sequence(X_valid, in_vocab)
     y_valid_seq, _, _ = text_to_sequence(y_valid, out_vocab)
-    X_valid_seq, X_valid_masks = batch(X_valid_seq, batch_size=BATCH_SIZE, mask=len(in_vocab)-1) 
-    y_valid_seq, y_valid_masks = batch(y_valid_seq, batch_size=BATCH_SIZE, mask=len(in_vocab)-1)
+    X_valid_seq, X_valid_masks = batch(X_valid_seq, batch_size=VALID_BATCH_SIZE, mask=len(in_vocab)-1) 
+    y_valid_seq, y_valid_masks = batch(y_valid_seq, batch_size=VALID_BATCH_SIZE, mask=len(out_vocab)-1)
     print('Done.')
 
     print('Contains %d unique words.' % len(in_vocab))
     print('Read in %d examples.' % len(X_train))
+
+    print('Input vocabulary sample...')
+    print('\n'.join(in_vocab[:10]))
+    print('Output vocabulary sample...')
+    print('\n'.join(out_vocab[:10]))
+
+    i = random.randint(0, len(X_train)-1)
+    print('Showing example %d out of %d' % (i, len(X_train)))
+    print(' '.join(X_train[i]))
+    print(' '.join(y_train[i]))
 
     print('Checkpointing models on validation loss...')
     lowest_val_loss = 0.
@@ -108,7 +122,7 @@ if __name__ == '__main__':
 
     print('Training model...')
     EPOCHS = 3000
-    trainer = dy.AdamTrainer(collection, alpha=0.02, beta_1=0.85, beta_2=0.997, eps=1e-6)
+    trainer = dy.AdamTrainer(collection, beta_1=0.85, beta_2=0.997, eps=1e-6)
     trainer.set_clip_threshold(0.0)
 
     for epoch in range(1, EPOCHS+1):
@@ -144,7 +158,7 @@ if __name__ == '__main__':
         for i, (X_batch, y_batch, X_masks, y_masks, X_batch_raw, y_batch_raw) in \
                 enumerate(zip(X_valid_seq, y_valid_seq, X_valid_masks, y_valid_masks, X_valid_raw, y_valid_raw), 1):
             dy.renew_cg()
-            batch_loss, decoding = seq2seq.one_batch(X_batch, y_batch, X_masks, y_masks, training=True)
+            batch_loss, decoding = seq2seq.one_batch(X_batch, y_batch, X_masks, y_masks, training=False)
             loss += batch_loss.value()
 
             y_pred = seq2seq.to_sequence_batch(decoding, out_vocab)

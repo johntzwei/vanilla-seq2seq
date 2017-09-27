@@ -2,16 +2,18 @@ import numpy as np
 import _gdynet as dy
 
 class Seq2SeqAttention:
-    def __init__(self, collection, vocab_size, out_vocab_size, embedding_dim=128, encoder_layers=3, decoder_layers=3, \
-            encoder_hidden_dim=256, decoder_hidden_dim=256, encoder_dropout=0.3, decoder_dropout=0.3, attention_dropout=0.3):
+    def __init__(self, collection, vocab_size, out_vocab_size, output_embedding_dim=32, input_embedding_dim=128, \
+            encoder_layers=3, decoder_layers=3, encoder_hidden_dim=256, decoder_hidden_dim=256, \
+            encoder_dropout=0.3, decoder_dropout=0.3, attention_dropout=0.3):
         self.collection = collection
         self.params = {}
 
         self.params['W_emb'] = collection.add_lookup_parameters((vocab_size, embedding_dim))
-        self.params['Wout_emb'] = collection.add_lookup_parameters((out_vocab_size, embedding_dim))
+        self.params['Wout_emb'] = collection.add_lookup_parameters((out_vocab_size, out_vocab_size), \
+                init=dy.IdentityInitializer())
         self.encoder = dy.VanillaLSTMBuilder(encoder_layers, embedding_dim, encoder_hidden_dim, collection)
 
-        self.decoder = [ dy.VanillaLSTMBuilder(decoder_layers-1, embedding_dim, decoder_hidden_dim, collection), \
+        self.decoder = [ dy.VanillaLSTMBuilder(decoder_layers-1, out_vocab_size, decoder_hidden_dim, collection), \
                 dy.VanillaLSTMBuilder(1, encoder_hidden_dim+decoder_hidden_dim, decoder_hidden_dim, collection) ]
         self.params['W_1'] = collection.add_parameters((decoder_hidden_dim, encoder_hidden_dim)) 
         self.params['W_2'] = collection.add_parameters((decoder_hidden_dim, decoder_hidden_dim)) 
@@ -24,7 +26,7 @@ class Seq2SeqAttention:
         self.decoder_dropout = decoder_dropout
         self.attention_dropout = attention_dropout
 
-    def one_sequence_batch(self, X_batch, maxlen, X_masks, eos=9999, teacher_forcing=None, training=True):
+    def one_sequence_batch(self, X_batch, maxlen, X_masks, eos=68, teacher_forcing=None, training=True):
         #params
         W_emb = self.params['W_emb']
         Wout_emb = self.params['Wout_emb']
@@ -43,7 +45,7 @@ class Seq2SeqAttention:
             self.decoder[0].set_dropouts(0, 0)
             self.decoder[1].set_dropouts(0, 0)
 
-        #encode
+        ''' #encode
         X = [ dy.lookup_batch(W_emb, tok_batch) for tok_batch in X_batch ]
         lstm = self.encoder.initial_state()
         states = lstm.add_inputs(X)
@@ -52,12 +54,16 @@ class Seq2SeqAttention:
 
         hidden_state = s1
         encoding = forward
+        '''
+        X = [ dy.lookup_batch(W_emb, tok_batch) for tok_batch in X_batch ]
+        lstm = self.encoder.initial_state()
+        encoding = lstm.transduce(X)
 
         for i, mask in enumerate(X_masks):
             mask_expr = dy.inputVector(mask)
             mask = dy.reshape(mask_expr, (1,), batch_size=len(X_masks[0]))
-            encoding[i] = dy.transpose(mask * dy.transpose(encoding[i]))
-
+            #encoding[i] = encoding[i] * mask
+            encoding[i] = encoding[i] * mask
         encoding = dy.concatenate_cols(encoding)
 
         #decode
@@ -65,12 +71,24 @@ class Seq2SeqAttention:
         if training:
             xs = dy.dropout(xs, self.attention_dropout)
 
-        s0_0 = self.decoder[0].initial_state(vecs=hidden_state[:2]+hidden_state[3:5])
-        s0_1 = self.decoder[1].initial_state(vecs=hidden_state[2:3]+hidden_state[5:])
+        #s0_0 = self.decoder[0].initial_state(vecs=hidden_state[:2]+hidden_state[3:5])
+        #s0_1 = self.decoder[1].initial_state(vecs=hidden_state[2:3]+hidden_state[5:])
+
+        s0_0 = self.decoder[0].initial_state()
+        s0_1 = self.decoder[1].initial_state()
 
         decoding = []
-        state_0 = s0_0.add_input(dy.lookup_batch(self.params['W_emb'], [eos for i in range(0, len(X_batch[0]))]))
-        state_1 = s0_1
+        if training:
+            state_0 = s0_0
+        else:
+            state_0 = s0_0.add_input(dy.nobackprop(dy.lookup_batch(Wout_emb, [eos for i in range(0, len(X_batch[0]))])))
+        state_1 = s0_1.add_input(dy.zeroes((256,), batch_size=len(X_batch[0])))
+
+        #transduce lower layers
+        if training:
+            eos = dy.nobackprop(dy.lookup_batch(Wout_emb, [eos for i in range(0, len(X_batch[0]))]))
+            y = [ eos ] + [ dy.nobackprop(dy.lookup_batch(Wout_emb, tf)) for tf in teacher_forcing ]
+            histories = state_0.transduce(y)
 
         for i in range(0, maxlen):
             #attention
@@ -83,21 +101,23 @@ class Seq2SeqAttention:
             d_t = encoding * dy.transpose(a_t)
 
             #input
-            history = state_0.h()[-1]
+            if training:
+                history = histories[i]
+            else:
+                history = state_0.h()[-1]
             inp = dy.concatenate([history, d_t])
             
             #next state
             state_1 = state_1.add_input(inp)
             h_i = state_1.h()[-1]
-            decoding.append(dy.softmax(dy.affine_transform([b, R, h_i])))
+            decoding.append(dy.affine_transform([b, R, h_i]))
 
             if training:
-                tf = dy.lookup_batch(Wout_emb, teacher_forcing[i])
-                state_0.add_input(tf)
+                pass
             else:
-                print('Not implemented yet!')
+                choices = np.argmax(np.reshape(decoding[-1].value(), (70, len(X_batch[0]))), axis=0)
+                state_0 = state_0.add_input(dy.lookup_batch(Wout_emb, choices))
         
-        #logits
         return decoding
 
     #takes logits
@@ -108,7 +128,7 @@ class Seq2SeqAttention:
         decoding = [  [ x[i] for x in decoding ] for i in range(0, batch_size) ]
         return [ [ out_vocab[y] for y in x ] for x in decoding ]
 
-    def one_batch(self, X_batch, y_batch, X_masks, y_masks, eos=9999, training=True):
+    def one_batch(self, X_batch, y_batch, X_masks, y_masks, eos=68, training=True):
         batch_size = len(X_batch)
         X_batch = zip(*X_batch)
         X_masks = zip(*X_masks)
