@@ -59,6 +59,18 @@ def linearize(tree, label=False, token=False, margin=1000):
 
     return lin
 
+def label_closing_brackets(lin):
+    stack = []
+    lin = lin.split(' ')
+    for i, tok in enumerate(lin):
+        if tok.startswith('('):
+            stack.append(tok)
+
+        if tok == ')':
+            lin[i] = tok + stack.pop()[1:]
+
+    return ' '.join(lin)
+
 def get_vocab(fn='data/vocab', symbols=2):
     vocab = {}
     for sections in SECTIONS:
@@ -123,6 +135,7 @@ if __name__ == '__main__':
             for sent, tree in zip(ptb.sents(fileids), ptb.parsed_sents(fileids)):
                 sent = [ normalize(word) if normalize(word) in vocab else '<unk>' for word in sent ]
                 lin = linearize(tree, token=True, label=True)
+                lin = label_closing_brackets(lin)
                 h.write('%s\t%s\n' % (' '.join(sent), lin))
         h.close()
         print('Done.')
