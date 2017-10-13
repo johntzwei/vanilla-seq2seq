@@ -18,11 +18,14 @@ import numpy as np
 
 from model import Seq2SeqAttention
 
-def ptb(section='test.txt', directory='ptb/', padding='<EOS>', column=0):
+def ptb(section='test.txt', directory='ptb/', padding='<EOS>', column=0, TOK=True):
     with open(os.path.join(directory, section), 'rt') as fh:
         data = [ i.split('\t')[column] for i in fh ]
     data = [ ex.strip().split(' ') for ex in data ]
     data = [ ex + [padding] for ex in data ]
+
+    if TOK:
+        data = [ [ tok for tok in ex if tok != '<TOK>' ] for ex in data ]
     vocab = set([ word for sent in data for word in sent ])
     return vocab, data
 
@@ -41,7 +44,7 @@ def text_to_sequence(texts, vocab):
 
 def sort_by_len(X, y):
     data = list(zip(X, y))
-    data.sort(key=lambda x: -len(x[1]))
+    data.sort(key=lambda x: len(x[1]))
     return [ i[0] for i in data ], [ i[1] for i in data ]
 
 def batch(X, batch_size, mask=0.):
@@ -71,15 +74,24 @@ if __name__ == '__main__':
     _, X_train = ptb(section='wsj_2-21', directory='data/', column=0)
     _, y_train = ptb(section='wsj_2-21', directory='data/', column=1)
     X_train, y_train = sort_by_len(X_train, y_train)
-    X_train, y_train = X_train[30:], y_train[30:]           #throw away the really long examples
-    X_train_seq, word_to_n, n_to_word = text_to_sequence(X_train, in_vocab)
-    y_train_seq, _, _ = text_to_sequence(y_train, out_vocab)
+    X_train_long, y_train_long = X_train[-300:-30], y_train[-300:-30] 
+    X_train_short, y_train_short = X_train[:-300], y_train[:-300]
+    X_train_seq, word_to_n, n_to_word = text_to_sequence(X_train_short, in_vocab)
+    y_train_seq, _, _ = text_to_sequence(y_train_short, out_vocab)
+    X_train_long_seq, _, _ = text_to_sequence(X_train_long, in_vocab)
+    y_train_long_seq, _, _ = text_to_sequence(y_train_long, out_vocab)
     X_train_seq, X_train_masks = batch(X_train_seq, batch_size=BATCH_SIZE, mask=len(in_vocab)-1)
     y_train_seq, y_train_masks = batch(y_train_seq, batch_size=BATCH_SIZE, mask=len(out_vocab)-1)
+    X_train_long_seq, X_train_long_masks = batch(X_train_long_seq, batch_size=32, mask=len(in_vocab)-1)
+    y_train_long_seq, y_train_long_masks = batch(y_train_long_seq, batch_size=32, mask=len(out_vocab)-1)
+
+    X_train_seq = X_train_seq + X_train_long_seq
+    y_train_seq = y_train_seq + y_train_long_seq
+    X_train_masks = X_train_masks + X_train_long_masks 
+    y_train_masks = y_train_masks + y_train_long_masks
 
     _, X_valid = ptb(section='wsj_24', directory='data/', column=0)
     _, y_valid = ptb(section='wsj_24', directory='data/', column=1)
-    #X_valid, y_valid = X_train, y_train
     X_valid, y_valid = sort_by_len(X_valid, y_valid)
     X_valid_raw, _ = batch(X_valid, batch_size=VALID_BATCH_SIZE, mask='<mask>') 
     y_valid_raw, _ = batch(y_valid, batch_size=VALID_BATCH_SIZE, mask='<mask>')
@@ -106,6 +118,7 @@ if __name__ == '__main__':
     print('Checkpointing models on validation loss...')
     lowest_val_loss = 0.
     highest_val_accuracy = 0.
+    last_train_loss = 0.
 
     RUN = 'runs/baseline'
     checkpoint = os.path.join(RUN, 'baseline.model')
@@ -122,8 +135,11 @@ if __name__ == '__main__':
 
     print('Training model...')
     EPOCHS = 3000
-    trainer = dy.AdamTrainer(collection, beta_1=0.85, beta_2=0.997, eps=1e-6)
-    trainer.set_clip_threshold(0.0)
+    epochs_to_update = 1
+    patience = 0
+    e0 = 0.005
+    trainer = dy.AdamTrainer(collection, alpha=e0, beta_1=0.85, beta_2=0.997, eps=1e-8, edecay=1)
+    trainer.set_clip_threshold(10.0)
 
     for epoch in range(1, EPOCHS+1):
         loss = 0.
@@ -171,15 +187,35 @@ if __name__ == '__main__':
         accuracy = correct_toks/total_toks
         print('Validation loss: %f. Token-level accuracy: %f.' % (loss, accuracy))
 
+        save = False
         if lowest_val_loss == 0. or loss < lowest_val_loss:
-            print('Lowest validation loss yet. Saving model...')
-            collection.save(checkpoint)
+            print('Lowest validation loss yet.')
+            save = True
             lowest_val_loss = loss
 
         if highest_val_accuracy == 0. or accuracy > highest_val_accuracy:
-            print('Highest accuracy yet. Saving model...')
-            collection.save(checkpoint)
+            print('Highest accuracy yet.')
+            save = True
             highest_val_accuracy = accuracy
-        print('Done.')
 
+        if last_train_loss == 0 or avg_batch_loss < last_train_loss:
+            print('Lowest training loss yet.')
+            save = True
+            lowest_train_loss = avg_batch_loss
+        else:
+            if patience > 1:
+                print('No improvement. Actually halving learning rate.')
+                trainer.update_epoch(epochs_to_update)
+                epochs_to_update *= 2
+                patience = 0
+            else:
+                print('Patience at %d' % patience)
+                patience += 1
+        last_train_loss = avg_batch_loss
+
+        if save:
+            print('Saving model...')
+            collection.save(checkpoint)
+
+        print('Done.')
     print('Done.')

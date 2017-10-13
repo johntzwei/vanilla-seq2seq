@@ -6,22 +6,18 @@ from model import Seq2SeqAttention
 from utils import ptb, read_vocab, text_to_sequence, \
         sort_by_len, batch
 
-import dynet_config
-dynet_config.set_gpu()
-dynet_config.set(mem=512, \
-        random_seed=random.randint(1, 100),
-    )
-import dynet as dy
+import _gdynet as dy
 
 if __name__ == '__main__':
     print('Reading vocab...')
     in_vocab = read_vocab()
     in_vocab +=  ['<unk>', '<EOS>', '<mask>']
-    out_vocab = ['(', ')', '<TOK>', '<EOS>']
+    out_vocab = read_vocab(vocab='out_vocab')
+    out_vocab += ['<EOS>', '<mask>'] 
     print('Done.')
 
     print('Reading test data...')
-    BATCH_SIZE = 128
+    BATCH_SIZE = 32
     _, X_test = ptb(section='wsj_23', directory='data/', column=0)
     _, y_test = ptb(section='wsj_23', directory='data/', column=1)
     X_test, y_test = sort_by_len(X_test, y_test)
